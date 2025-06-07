@@ -1,0 +1,18 @@
+# OASIS Environment Configuration
+# Copy this file to .env and fill in your values
+
+# Google AI Configuration
+GOOGLE_API_KEY=your_gemini_api_key_here
+GOOGLE_PROJECT_ID=your_google_project_id
+
+# Application Configuration
+APP_MODE=simple  # simple or developer
+LOG_LEVEL=INFO
+
+# Local Model Configuration (for future use)
+LOCAL_MODEL_PATH=./models
+CACHE_SIZE_GB=10
+
+# UI Configuration
+THEME=dark  # light or dark
+WINDOW_SIZE=1024x768 
