@@ -37,7 +37,14 @@ def run_cli_test():
         
         print(f"\n🤖 Agent Response:")
         print(f"Final Answer: {result.get('final_answer', 'No response')}")
-        print(f"Tool Calls: {len(result.get('tool_calls', []))}")
+        
+        # Handle tool_calls properly - it might be an integer count or a list
+        tool_calls = result.get('tool_calls', 0)
+        if isinstance(tool_calls, int):
+            print(f"Tool Calls: {tool_calls}")
+        else:
+            print(f"Tool Calls: {len(tool_calls)}")
+            
         print(f"Processing Status: {result.get('processing_status', 'Unknown')}")
         
         # Show available tools (with error handling)

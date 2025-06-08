@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.memory import InMemoryStore
+from loguru import logger
 
 # Import the official supervisor
 try:
@@ -38,64 +39,127 @@ except ImportError as e:
     MongoDBAtlasVectorSearch = None
     create_retriever_tool = None
     MongoClient = None
-from loguru import logger
 
-# Handle both relative and absolute imports with audio tools fallback
+# Import safe tool functions
 def safe_import_audio_tools():
-    """Safely import audio tools with fallback for dependency issues."""
+    """Import audio tools - no fallback."""
     try:
-        # Try relative import first
-        from ..tools.audio import get_denoise_tools, audio_denoise_tool
-        return get_denoise_tools, audio_denoise_tool
+        # First try direct import from backend.src.tools.audio
+        from backend.src.tools.audio import get_denoise_tools
+        return get_denoise_tools
     except ImportError:
         try:
-            # Try absolute import
-            from src.tools.audio import get_denoise_tools, audio_denoise_tool
-            return get_denoise_tools, audio_denoise_tool
-        except ImportError as e:
-            logger.warning(f"Could not import audio tools: {e}")
-            logger.info("Creating fallback audio tools...")
-            
-            # Create fallback audio tools
-            @tool
-            def fallback_audio_tool(audio_path: str) -> str:
-                """Fallback audio tool when dependencies are not available."""
-                return f"Audio processing not available due to dependency issues. File: {audio_path}"
-            
-            def get_fallback_denoise_tools():
-                return [fallback_audio_tool]
-            
-            return get_fallback_denoise_tools, fallback_audio_tool
+            # Try relative import when running from backend directory
+            from src.tools.audio import get_denoise_tools
+            return get_denoise_tools
+        except ImportError:
+            # Try adding backend to path and importing
+            import sys
+            import os
+            backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+            if backend_path not in sys.path:
+                sys.path.insert(0, backend_path)
+            from src.tools.audio import get_denoise_tools
+            return get_denoise_tools
+
+def safe_import_text_tools():
+    """Import text processing tools - no fallback."""
+    try:
+        from backend.src.tools.text import get_text_tools
+        return get_text_tools
+    except ImportError:
+        try:
+            from src.tools.text import get_text_tools
+            return get_text_tools
+        except ImportError:
+            import sys
+            import os
+            backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+            if backend_path not in sys.path:
+                sys.path.insert(0, backend_path)
+            from src.tools.text import get_text_tools
+            return get_text_tools
+
+def safe_import_document_tools():
+    """Import document processing tools - no fallback."""
+    try:
+        from backend.src.tools.document import get_document_tools
+        return get_document_tools
+    except ImportError:
+        try:
+            from src.tools.document import get_document_tools
+            return get_document_tools
+        except ImportError:
+            import sys
+            import os
+            backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+            if backend_path not in sys.path:
+                sys.path.insert(0, backend_path)
+            from src.tools.document import get_document_tools
+            return get_document_tools
+
+def safe_import_video_tools():
+    """Import video processing tools - no fallback."""
+    try:
+        from backend.src.tools.video import get_video_tools
+        return get_video_tools
+    except ImportError:
+        try:
+            from src.tools.video import get_video_tools
+            return get_video_tools
+        except ImportError:
+            import sys
+            import os
+            backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+            if backend_path not in sys.path:
+                sys.path.insert(0, backend_path)
+            from src.tools.video import get_video_tools
+            return get_video_tools
 
 # Import settings with fallback
 try:
-    from ..config.settings import settings
+    from backend.src.config.settings import settings
 except ImportError:
-    # Fallback for direct execution
-    import sys
-    from pathlib import Path
-    
-    # Add the project root to the path
-    project_root = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(project_root))
-    
     try:
         from src.config.settings import settings
     except ImportError:
-        logger.warning("Could not import settings, creating fallback")
-        
-        # Create a minimal settings fallback
-        class FallbackSettings:
-            app_mode = "fallback"
-            mongo_uri = "mongodb://localhost:27017"
+        try:
+            # Try adding backend to path and importing
+            import sys
+            import os
+            backend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+            if backend_path not in sys.path:
+                sys.path.insert(0, backend_path)
+            from src.config.settings import settings
+        except ImportError:
+            # Fallback for direct execution
+            import sys
+            from pathlib import Path
             
-            def is_google_configured(self):
-                return False  # Not needed since we only use Vertex AI
-        
-        settings = FallbackSettings()
+            # Add the project root to the path
+            project_root = Path(__file__).parent.parent.parent
+            sys.path.insert(0, str(project_root))
+            
+            try:
+                from src.config.settings import settings
+            except ImportError:
+                logger.warning("Could not import settings, creating fallback")
+                
+                # Create a minimal settings fallback
+                class FallbackSettings:
+                    app_mode = "fallback"
+                    mongo_uri = "mongodb://localhost:27017"
+                    
+                    def is_google_configured(self):
+                        return False  # Not needed since we only use Vertex AI
+                
+                settings = FallbackSettings()
 
-# Import audio tools with safe fallback
-get_denoise_tools, audio_denoise_tool = safe_import_audio_tools()
+# Import all tool functions
+get_denoise_tools = safe_import_audio_tools()
+get_text_tools = safe_import_text_tools()
+get_document_tools = safe_import_document_tools()
+get_video_tools = safe_import_video_tools()
 
 # ===== TOOL DEFINITIONS =====
 
@@ -125,6 +189,120 @@ def text_formatting(text: str, format_type: str) -> str:
     """Format text for different outputs like HTML, Markdown, or plain text."""
     return f"Formatted text as {format_type}: <{format_type.lower()}>{text[:50]}...</{format_type.lower()}>"
 
+@tool
+def document_analysis(file_path: str, analysis_type: str = "summary") -> str:
+    """Analyze and process document files including text, PDF, and other document formats."""
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(file_path)
+    if not resolved_path:
+        return f"""📄 Document Analysis Service
+
+I can analyze and process various document types, but I need a document file to work with.
+
+**What I can analyze:**
+• Text files (.txt, .md, .rtf)
+• PDF documents
+• Word documents (.doc, .docx)
+• Content summarization and extraction
+• Language detection and translation
+• Sentiment analysis of text content
+
+**Analysis types available:**
+• summary - Create a concise summary
+• content - Extract and display full content
+• translate - Translate document content
+• sentiment - Analyze emotional tone
+• keywords - Extract key terms and topics
+
+**Supported formats:** TXT, PDF, DOC, DOCX, RTF, MD
+
+To analyze a document:
+1. Upload your document using the 'Files' button
+2. Ask me to analyze it (e.g., "analyze this document" or "summarize this file")
+3. Optionally specify analysis type: "{analysis_type}"
+
+Would you like to upload a document for analysis?"""
+    
+    # For now, return a placeholder since this is a mock tool
+    # In a real implementation, this would read and process the actual file
+    filename = os.path.basename(resolved_path)
+    
+    try:
+        # Try to read the file content if it's a text file
+        if resolved_path.lower().endswith(('.txt', '.md', '.rtf')):
+            with open(resolved_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            if analysis_type == "summary":
+                return f"📄 Document Summary for {filename}:\n\n" \
+                       f"• File type: Text document\n" \
+                       f"• Length: {len(content)} characters, {len(content.split())} words\n" \
+                       f"• Content preview: {content[:200]}{'...' if len(content) > 200 else ''}\n\n" \
+                       f"This appears to be a text document. I can provide full content analysis, translation, or other processing as needed."
+            
+            elif analysis_type == "content":
+                return f"📄 Full Content of {filename}:\n\n{content}"
+            
+            elif analysis_type == "translate":
+                return f"📄 Translation ready for {filename}:\n\n" \
+                       f"Content extracted successfully. Please specify target language for translation.\n" \
+                       f"Preview: {content[:200]}{'...' if len(content) > 200 else ''}"
+            
+            else:
+                return f"📄 Document Analysis for {filename}:\n\n" \
+                       f"• File successfully processed\n" \
+                       f"• Content length: {len(content)} characters\n" \
+                       f"• Analysis type: {analysis_type}\n" \
+                       f"• Ready for further processing"
+        
+        else:
+            return f"📄 Document Analysis for {filename}:\n\n" \
+                   f"• File type: {os.path.splitext(filename)[1].upper()} document\n" \
+                   f"• Status: File located and ready for processing\n" \
+                   f"• Analysis type: {analysis_type}\n" \
+                   f"• Note: Specialized processing available for this document type"
+    
+    except Exception as e:
+        return f"📄 Document Analysis for {filename}:\n\n" \
+               f"• File located but encountered processing error: {str(e)}\n" \
+               f"• The file exists and can be accessed for other operations"
+
+def _resolve_file_path(file_path: str) -> str:
+    """
+    Resolve a file path by checking if it exists directly, or if it's just a filename,
+    try to find it in the current agent's uploaded files list.
+    """
+    logger.info(f"🔍 Resolving file path: '{file_path}'")
+    
+    # If the path exists directly, return it
+    if os.path.exists(file_path):
+        logger.info(f"✅ File found directly at: {file_path}")
+        return file_path
+    
+    # If it's just a filename, try to find it in uploaded files
+    # This will be set by the agent when processing uploaded files
+    if hasattr(_resolve_file_path, '_uploaded_files') and _resolve_file_path._uploaded_files:
+        logger.info(f"📁 Checking uploaded files list: {_resolve_file_path._uploaded_files}")
+        filename = os.path.basename(file_path)
+        logger.info(f"🔎 Looking for filename: '{filename}'")
+        
+        for uploaded_path in _resolve_file_path._uploaded_files:
+            uploaded_filename = os.path.basename(uploaded_path)
+            logger.info(f"📄 Comparing with uploaded file: '{uploaded_filename}' (full path: {uploaded_path})")
+            
+            if uploaded_filename == filename:
+                if os.path.exists(uploaded_path):
+                    logger.info(f"✅ Found matching file: {uploaded_path}")
+                    return uploaded_path
+                else:
+                    logger.warning(f"⚠️ Matching filename found but file doesn't exist: {uploaded_path}")
+    else:
+        logger.warning("⚠️ No uploaded files list available for path resolution")
+    
+    # File not found
+    logger.warning(f"❌ File not found: {file_path}")
+    return None
+
 # Image Processing Tools
 @tool
 def image_recognition(image_path: str) -> str:
@@ -132,7 +310,24 @@ def image_recognition(image_path: str) -> str:
     # Try to resolve file path if only filename is provided
     resolved_path = _resolve_file_path(image_path)
     if not resolved_path:
-        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+        return f"""🖼️ Image Analysis Service
+
+I can help with image recognition and scene understanding, but I need an image file to analyze.
+
+**What I can do:**
+• Object detection and identification
+• Scene understanding and description  
+• Text recognition (OCR) for reading text in images
+• Color and composition analysis
+• Recommend appropriate processing techniques
+
+**Supported formats:** JPG, PNG, GIF, BMP, TIFF, WebP
+
+To analyze an image:
+1. Click the 'Files' button to upload your image
+2. Ask me to analyze it (e.g., "analyze this image" or "what's in this picture?")
+
+Would you like to upload an image for analysis?"""
     
     # For now, return a placeholder since this is a mock tool
     # In a real implementation, this would use actual image recognition
@@ -152,7 +347,24 @@ def image_enhancement(image_path: str, enhancement_type: str = "auto") -> str:
     # Try to resolve file path if only filename is provided
     resolved_path = _resolve_file_path(image_path)
     if not resolved_path:
-        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+        return f"""✨ Image Enhancement Service
+
+I can enhance image quality in various ways, but I need an image file to work with.
+
+**Enhancement options available:**
+• Auto enhancement (brightness, contrast, sharpness)
+• Noise reduction and denoising
+• Color correction and saturation
+• Upscaling and resolution improvement
+• HDR processing for better dynamic range
+
+**Supported formats:** JPG, PNG, GIF, BMP, TIFF, WebP
+
+To enhance an image:
+1. Upload your image using the 'Files' button
+2. Specify enhancement type: "{enhancement_type}" or choose from: auto, brightness, contrast, denoise, upscale
+
+Would you like to upload an image for enhancement?"""
     
     return f"✅ Enhanced {os.path.basename(resolved_path)} with {enhancement_type} improvements. The image has been processed for better clarity and quality."
 
@@ -182,7 +394,30 @@ def ocr_text_extraction(image_path: str, language: str = "auto") -> str:
     # Try to resolve file path if only filename is provided
     resolved_path = _resolve_file_path(image_path)
     if not resolved_path:
-        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+        return f"""📄 OCR Text Extraction Service
+
+I can extract and read text from images in multiple languages, but I need an image containing text to process.
+
+**What I can extract:**
+• Text from documents, screenshots, signs, handwriting
+• Multiple languages: English, Spanish, French, German, Chinese, Japanese, Korean, etc.
+• Formatted text with layout preservation
+• Text from photos of books, papers, whiteboards
+
+**Supported image formats:** JPG, PNG, GIF, BMP, TIFF, WebP
+
+**Language options:**
+• auto (automatic detection)
+• en, es, fr, de, zh, ja, ko, and more
+
+To extract text from an image:
+1. Upload an image containing text using the 'Files' button  
+2. Ask me to extract the text (e.g., "read the text in this image")
+3. Optionally specify language: "{language}"
+
+Perfect for translating text in images - I can extract the text and then translate it!
+
+Would you like to upload an image with text to extract?"""
     
     # For now, return a placeholder since this is a mock tool
     # In a real implementation, this would use actual OCR like Tesseract
@@ -202,27 +437,6 @@ def ocr_text_extraction(image_path: str, language: str = "auto") -> str:
     
     return sample_texts.get(language, sample_texts["auto"])
 
-def _resolve_file_path(file_path: str) -> str:
-    """
-    Resolve a file path by checking if it exists directly, or if it's just a filename,
-    try to find it in the current agent's uploaded files list.
-    """
-    # If the path exists directly, return it
-    if os.path.exists(file_path):
-        return file_path
-    
-    # If it's just a filename, try to find it in uploaded files
-    # This will be set by the agent when processing uploaded files
-    if hasattr(_resolve_file_path, '_uploaded_files') and _resolve_file_path._uploaded_files:
-        filename = os.path.basename(file_path)
-        for uploaded_path in _resolve_file_path._uploaded_files:
-            if os.path.basename(uploaded_path) == filename:
-                if os.path.exists(uploaded_path):
-                    return uploaded_path
-    
-    # File not found
-    return None
-
 # Audio Processing Tools
 @tool
 def audio_transcription(audio_path: str, language: str = "auto") -> str:
@@ -236,18 +450,59 @@ def audio_synthesis(text: str, voice: str = "natural", emotion: str = "neutral")
 
 @tool
 def audio_analysis(audio_path: str) -> str:
-    """Analyze audio for duration, language, speakers, and emotions."""
-    return f"Audio analysis of {audio_path}: Duration: 3:45, Language: English, Speakers: 2, Emotion: Neutral"
-
-@tool
-def audio_enhancement(audio_path: str, enhancement_type: str = "noise_reduction") -> str:
-    """Enhance audio quality with various processing techniques."""
-    return f"Enhanced {audio_path} with {enhancement_type}, improved clarity and reduced artifacts"
+    """Analyze audio for characteristics like tempo, pitch, and quality metrics."""
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(audio_path)
+    if not resolved_path:
+        return "🎵 Audio Analysis Service\n\nI can analyze audio files for various characteristics, but I need an audio file to work with.\n\n**What I can analyze:**\n• Audio quality and technical specs\n• Tempo and rhythm analysis\n• Pitch and frequency analysis\n• Audio format and codec information\n• Duration and file size metrics\n\n**Supported formats:** MP3, WAV, FLAC, AAC, OGG, M4A\n\nTo analyze an audio file:\n1. Upload your audio using the 'Files' button\n2. Ask me to analyze it (e.g., \"analyze this audio file\")\n\nWould you like to upload an audio file for analysis?"
+    
+    filename = os.path.basename(audio_path)
+    return f"🎵 Audio analysis of {filename}: Sample rate: 44.1kHz, Bitrate: 320kbps, Duration: 3:45, Quality: High"
 
 @tool
 def music_analysis(audio_path: str) -> str:
     """Analyze music for tempo, key, genre, and musical features."""
     return f"Music analysis of {audio_path}: Tempo: 120 BPM, Key: C Major, Genre: Pop, Energy: High"
+
+@tool
+def audio_enhancement(audio_path: str, enhancement_type: str = "noise_reduction") -> str:
+    """Enhance audio quality with various processing techniques."""
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(audio_path)
+    if not resolved_path:
+        return """🎵 Audio Enhancement Service
+
+I can enhance audio quality by reducing noise and improving clarity, but I need an audio file to work with.
+
+**What I can enhance:**
+• Noise reduction and audio cleaning
+• Audio quality improvement
+• Background noise removal
+• Audio level normalization
+• Echo and reverb reduction
+
+**Supported formats:** MP3, WAV, FLAC, AAC, OGG, M4A
+
+To enhance an audio file:
+1. Upload your audio using the 'Files' button
+2. Ask me to enhance it (e.g., "denoise this audio" or "enhance audio quality")
+
+Would you like to upload an audio file for enhancement?"""
+    
+    # Import and use the real denoise tool
+    try:
+        denoise_tools = get_denoise_tools()
+        if denoise_tools:
+            # Use the first denoise tool (audio_denoise_tool)
+            denoise_tool = denoise_tools[0]
+            # Generate output path
+            base_name = os.path.splitext(resolved_path)[0]
+            output_path = f"{base_name}_enhanced.wav"
+            return denoise_tool.func(resolved_path, output_path)
+        else:
+            return "❌ Audio enhancement tools not available"
+    except Exception as e:
+        return f"❌ Error enhancing audio: {str(e)}"
 
 # System Tools
 @tool
@@ -283,7 +538,7 @@ def get_file_info(file_path: str) -> str:
         else:
             size_str = f"{file_size:.1f} TB"
         
-        return f"📄 File: {os.path.basename(file_path)}\n📁 Path: {file_path}\n�� Size: {size_str}\n🏷️  Type: {file_ext or 'No extension'}"
+        return f"📄 File: {os.path.basename(file_path)}\n📁 Path: {file_path}\n Size: {size_str}\n🏷️  Type: {file_ext or 'No extension'}"
     except Exception as e:
         return f"❌ Error reading file info: {str(e)}"
 
@@ -291,6 +546,44 @@ def get_file_info(file_path: str) -> str:
 def request_file_upload(file_types: str, purpose: str, details: str = "") -> str:
     """Request user to upload specific file types for task completion."""
     return f"📤 UPLOAD_REQUEST: {file_types}|{purpose}|{details}"
+
+@tool
+def debug_file_access(filename: str = "") -> str:
+    """Debug tool to test file access and uploaded files list."""
+    debug_info = ["🔧 Debug File Access Information:"]
+    
+    # Check if we have the uploaded files list
+    if hasattr(_resolve_file_path, '_uploaded_files'):
+        files = _resolve_file_path._uploaded_files
+        debug_info.append(f"📁 Uploaded files list: {len(files) if files else 0} files")
+        if files:
+            for i, file_path in enumerate(files, 1):
+                exists = os.path.exists(file_path)
+                basename = os.path.basename(file_path)
+                debug_info.append(f"  {i}. {basename} -> {file_path} ({'✅ exists' if exists else '❌ missing'})")
+        else:
+            debug_info.append("  (no files in list)")
+    else:
+        debug_info.append("❌ No uploaded files list available")
+    
+    # Check global files variable
+    if '_current_uploaded_files' in globals():
+        global_files = globals()['_current_uploaded_files']
+        debug_info.append(f"🌐 Global files list: {len(global_files) if global_files else 0} files")
+    else:
+        debug_info.append("❌ No global files list")
+    
+    # Test specific filename if provided
+    if filename:
+        debug_info.append(f"\n🔍 Testing specific file: '{filename}'")
+        resolved = _resolve_file_path(filename)
+        if resolved:
+            debug_info.append(f"✅ Resolved to: {resolved}")
+            debug_info.append(f"✅ File exists: {os.path.exists(resolved)}")
+        else:
+            debug_info.append(f"❌ Could not resolve: {filename}")
+    
+    return "\n".join(debug_info)
 
 
 class BigToolManager:
@@ -378,15 +671,15 @@ class BigToolManager:
     
     def _initialize_tool_registry(self) -> None:
         """Initialize the tool registry with all available tools."""
-        # Get all tool categories
+        # Get all tool categories including Google Cloud tools
         text_tools = [
             text_summarization, text_translation, text_analysis,
-            advanced_text_processing, text_formatting
-        ]
+            advanced_text_processing, text_formatting, document_analysis
+        ] + get_text_tools()
         
         image_tools = [
             image_recognition, image_generation, image_enhancement,
-            image_segmentation, image_style_transfer
+            image_segmentation, image_style_transfer, ocr_text_extraction
         ]
         
         # Get audio tools including imported denoise tools
@@ -395,6 +688,12 @@ class BigToolManager:
             audio_enhancement, music_analysis
         ] + get_denoise_tools()
         
+        # Add document processing tools as a separate category
+        document_tools = get_document_tools()
+        
+        # Add video processing tools as a separate category  
+        video_tools = get_video_tools()
+        
         system_tools = [get_system_info, get_file_info]
         
         # Create tool registry with UUIDs
@@ -402,6 +701,8 @@ class BigToolManager:
             "text": text_tools,
             "image": image_tools,
             "audio": audio_tools,
+            "document": document_tools,
+            "video": video_tools,
             "system": system_tools
         }
         
@@ -526,6 +827,16 @@ class BigToolManager:
                 f"Use {name} to process sound files and audio content",
                 f"Apply {name} for audio analysis and enhancement"
             ])
+        elif category == "document":
+            examples.extend([
+                f"Use {name} to process and analyze documents",
+                f"Apply {name} for document intelligence and extraction tasks"
+            ])
+        elif category == "video":
+            examples.extend([
+                f"Use {name} to process and analyze video content",
+                f"Apply {name} for video intelligence and analysis tasks"
+            ])
         
         return examples
     
@@ -535,7 +846,7 @@ class BigToolManager:
         
         Args:
             query: Search query describing the desired functionality
-            category: Optional category filter (text, image, audio, system)
+            category: Optional category filter (text, image, audio, document, video, system)
             limit: Maximum number of tools to return
             
         Returns:
@@ -826,7 +1137,9 @@ class OASISAgent:
     
     def __init__(self, mongodb_uri: str = None, use_memory: bool = True, use_bigtool: bool = True):
         """Initialize the OASIS Agent with supervisor system."""
-        logger.info("🚀 Initializing OASIS Agent with supervisor system...")
+        logger.info("🚀 OASIS AGENT: Starting comprehensive initialization")
+        logger.info(f"🔧 Configuration: Memory={use_memory}, BigTool={use_bigtool}")
+        logger.info(f"🏗️ MongoDB URI: {'Provided' if mongodb_uri else 'Using default'}")
         
         self.settings = self._get_settings()
         self.mongodb_uri = mongodb_uri or self.settings.mongo_uri
@@ -840,18 +1153,64 @@ class OASISAgent:
         self.app = None
         
         # Add requirement analyzer
+        logger.info("🧠 COMPONENTS: Initializing requirement analyzer")
         self.requirement_analyzer = RequirementAnalyzer()
         self.uploaded_files = []  # Track uploaded files
         
-        # Initialize components
+        # Initialize components with detailed logging
+        logger.info("🤖 LLM SETUP: Initializing language model")
         self._setup_llm()
+        
         if self.use_memory:
+            logger.info("💾 MEMORY SETUP: Initializing conversation persistence")
             self._setup_memory()
+        else:
+            logger.info("💾 MEMORY: Disabled - no conversation persistence")
+            
         if self.use_bigtool:
+            logger.info("🧠 BIGTOOL SETUP: Initializing intelligent tool selection")
             self._setup_bigtool()
+        else:
+            logger.info("🧠 BIGTOOL: Disabled - using fallback tool selection")
         
         # Build the supervisor system
+        logger.info("🎯 SUPERVISOR: Building multi-agent supervisor system")
         self._build_supervisor_system()
+        
+        # Final status report
+        if self.app:
+            logger.info("✅ SYSTEM STATUS: All components initialized successfully")
+            logger.info(f"🎯 AGENTS: 5 specialist agents (text, image, audio, document, video)")
+            if self.bigtool_manager:
+                logger.info(f"🧠 BIGTOOL: {len(self.bigtool_manager.tool_registry)} intelligent tools available")
+            if self.checkpointer:
+                logger.info("💾 MEMORY: Conversation persistence enabled")
+            logger.info("🎉 OASIS AGENT: Ready for intelligent task processing!")
+        else:
+            logger.error("❌ SYSTEM STATUS: Initialization failed")
+        
+        # Try to restore uploaded files from previous session if thread_id is available
+        self._restore_uploaded_files_from_history()
+    
+    def _restore_uploaded_files_from_history(self):
+        """Try to restore uploaded files from conversation history."""
+        # This is a placeholder - in a full implementation, this would query
+        # the conversation history to find previously uploaded files
+        # For now, we'll keep the current file list
+        if self.uploaded_files:
+            logger.info(f"🔄 Restored {len(self.uploaded_files)} files from session")
+    
+    def load_conversation_files(self, thread_id: str) -> None:
+        """Load uploaded files from a specific conversation thread."""
+        if not self.checkpointer or not thread_id:
+            return
+        
+        try:
+            # This would query the conversation history for uploaded files
+            # For now, we maintain the current implementation
+            logger.info(f"🔍 Checking conversation {thread_id} for uploaded files...")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load conversation files: {e}")
     
     def _get_settings(self):
         """Get settings object with fallback."""
@@ -969,40 +1328,64 @@ class OASISAgent:
         """Build the complete supervisor system using official LangGraph supervisor."""
         
         if not SUPERVISOR_AVAILABLE:
-            logger.error("❌ langgraph_supervisor not available. Please install: pip install langgraph-supervisor")
+            logger.error("❌ SUPERVISOR: langgraph_supervisor not available. Please install: pip install langgraph-supervisor")
             raise ImportError("langgraph_supervisor is required for the supervisor pattern")
         
         try:
+            logger.info("🎯 SUPERVISOR: Starting multi-agent system construction")
+            
             # Create individual specialist agents with basic tools for now
             # (They will be recreated with intelligent tools during actual queries)
+            logger.info("🤖 AGENT CREATION: Building text_expert agent")
             text_agent = create_react_agent(
                 model=self.llm,
                 tools=self._get_fallback_tools("text"),
                 name="text_expert"
             )
             
+            logger.info("🖼️ AGENT CREATION: Building image_expert agent")
             image_agent = create_react_agent(
                 model=self.llm,
                 tools=self._get_fallback_tools("image"),
                 name="image_expert"
             )
             
+            logger.info("🎵 AGENT CREATION: Building audio_expert agent")
             audio_agent = create_react_agent(
                 model=self.llm,
                 tools=self._get_fallback_tools("audio"),
                 name="audio_expert"
             )
             
-            # Create supervisor with system tools
-            supervisor_tools = [get_system_info, get_file_info]
+            logger.info("📄 AGENT CREATION: Building document_expert agent")
+            document_agent = create_react_agent(
+                model=self.llm,
+                tools=self._get_fallback_tools("document"),
+                name="document_expert"
+            )
             
-            # Enhanced prompt for OASIS supervisor with BigTool
+            logger.info("🎬 AGENT CREATION: Building video_expert agent")
+            video_agent = create_react_agent(
+                model=self.llm,
+                tools=self._get_fallback_tools("video"),
+                name="video_expert"
+            )
+            
+            logger.info("🛠️ SUPERVISOR TOOLS: Adding system tools")
+            # Create supervisor with system tools
+            supervisor_tools = [get_system_info, get_file_info, request_file_upload, debug_file_access]
+            logger.info(f"🛠️ System Tools: {len(supervisor_tools)} tools available")
+            
+            # Enhanced prompt for OASIS supervisor with BigTool and new agents
+            logger.info("📝 SUPERVISOR PROMPT: Configuring intelligent routing system")
             supervisor_prompt = """You are the OASIS Supervisor Agent managing specialized processing agents with BigTool integration:
 
 **Available Agents:**
-- text_expert: Text processing, translation, summarization, analysis (enhanced with BigTool selection)
+- text_expert: Text processing, translation, summarization, analysis, speech-to-text, text-to-speech (enhanced with BigTool selection)
 - image_expert: Image recognition, generation, editing, enhancement (enhanced with BigTool selection)
 - audio_expert: Audio transcription, synthesis, analysis, denoising (enhanced with BigTool selection)
+- document_expert: Document processing, OCR, PDF analysis, form processing using Document AI and Vision API (enhanced with BigTool selection)
+- video_expert: Video analysis, scene detection, text extraction, media translation using Video Intelligence API (enhanced with BigTool selection)
 
 **BigTool Integration:**
 - Each agent has access to intelligently selected tools based on user queries
@@ -1010,52 +1393,70 @@ class OASISAgent:
 - Semantic tool selection improves task execution accuracy
 
 **Your Role:**
-1. Analyze user requests carefully
-2. Determine which agent(s) should handle the task
-3. Route to appropriate agent(s) using handoff tools
-4. For multi-modal tasks, coordinate multiple agents sequentially
-5. Synthesize results and provide final comprehensive response
+1. **Attempt to process user requests directly** - don't preemptively assume files are needed
+2. **Route to appropriate agents** for task execution using handoff tools
+3. **Handle file requirements intelligently**:
+   - If an agent reports a file is missing during processing, use the request_file_upload tool
+   - Only request files when actually needed, not based on assumptions
+   - Let agents try to work with available information first
+4. **For multi-modal tasks**, coordinate multiple agents sequentially
+5. **Synthesize results** and provide comprehensive final responses
+
+**File Handling Guidelines:**
+- If user mentions files (images, audio, documents, videos) but hasn't uploaded any, try to help with general information first
+- Only use request_file_upload when an agent specifically needs a file to complete a task
+- When files are uploaded, ensure agents can access them via the file path resolution system
+- Be helpful and educational even when specific files aren't available
 
 **Guidelines:**
 - Use handoff tools to delegate to specialist agents
-- For complex tasks, you can hand off to multiple agents in sequence
+- For complex tasks, you can hand off to multiple agents in sequence  
 - Always provide a comprehensive final response to the user
 - Think step-by-step about agent routing decisions
 - Leverage BigTool's intelligent tool selection for optimal results
+- Be proactive in helping users accomplish their goals
+- For document processing tasks, route to document_expert
+- For video processing tasks, route to video_expert
 
 Be intelligent about routing - analyze what the user actually needs and leverage the enhanced tool selection capabilities."""
             
+            logger.info("🔗 WORKFLOW: Creating supervisor workflow with 5 agents")
             # Create the supervisor workflow using official LangGraph supervisor
             workflow = create_supervisor(
-                agents=[text_agent, image_agent, audio_agent],
+                agents=[text_agent, image_agent, audio_agent, document_agent, video_agent],
                 model=self.llm,
                 tools=supervisor_tools,
                 prompt=supervisor_prompt
             )
             
+            logger.info("⚙️ COMPILATION: Compiling supervisor system")
             # Compile with checkpointer if available
             if self.checkpointer:
                 self.app = workflow.compile(checkpointer=self.checkpointer)
-                logger.info("✅ OASIS supervisor system compiled with memory and BigTool")
+                logger.info("✅ SUPERVISOR: Compiled with memory persistence and BigTool integration")
             else:
                 self.app = workflow.compile()
-                logger.info("✅ OASIS supervisor system compiled with BigTool")
+                logger.info("✅ SUPERVISOR: Compiled with BigTool integration (no persistence)")
             
+            logger.info("📊 VISUALIZATION: Generating system graph")
             # Save visualization
             try:
                 with open("oasis_bigtool_supervisor.png", "wb") as f:
                     f.write(self.app.get_graph().draw_mermaid_png())
                 logger.info("📊 Graph visualization saved as oasis_bigtool_supervisor.png")
             except Exception as e:
-                logger.warning(f"Could not save graph visualization: {e}")
+                logger.warning(f"⚠️ Could not save graph visualization: {e}")
+            
+            logger.info("🎉 SUPERVISOR SYSTEM: Complete and ready for operation")
                 
         except Exception as e:
-            logger.error(f"❌ Failed to build supervisor system: {e}")
+            logger.error(f"❌ SUPERVISOR BUILD FAILED: {e}")
+            logger.exception("Full supervisor build error details:")
             raise
-    
+
     def process_message(self, message: str, thread_id: str = None, stream: bool = False, uploaded_files: list = None):
         """
-        Process a user message using the supervisor system with intelligent requirement checking.
+        Process a user message using the supervisor system with intelligent agent routing.
         
         Args:
             message: User's input message
@@ -1066,172 +1467,222 @@ Be intelligent about routing - analyze what the user actually needs and leverage
         Returns:
             Generator of updates if stream=True, otherwise Dict with final result
         """
-        # Update uploaded files list
+        # Update uploaded files list and ensure persistence
         if uploaded_files:
-            self.uploaded_files = uploaded_files
+            self.uploaded_files.extend([f for f in uploaded_files if f not in self.uploaded_files])
         
-        # Analyze requirements before processing
-        requirements = self.requirement_analyzer.analyze_requirements(message, self.uploaded_files)
+        # Always set the uploaded files for path resolution, even if empty list
+        self.set_uploaded_files(self.uploaded_files)
         
-        # If files are missing, return requirement request instead of processing
-        if requirements['needs_files'] and not requirements['has_required_files']:
-            upload_request = self.requirement_analyzer.generate_upload_request(requirements['missing_files'])
-            
-            if stream:
-                def requirement_stream():
-                    yield {
-                        "type": "requirement_check",
-                        "content": "🔍 Analyzing task requirements...",
-                        "timestamp": self._get_timestamp()
-                    }
-                    yield {
-                        "type": "file_required",
-                        "content": upload_request,
-                        "timestamp": self._get_timestamp(),
-                        "missing_files": requirements['missing_files'],
-                        "requires_upload": True
-                    }
-                return requirement_stream()
-            else:
-                return {
-                    "final_answer": upload_request,
-                    "agents_used": [],
-                    "processing_status": "awaiting_files",
-                    "missing_files": requirements['missing_files'],
-                    "requires_upload": True,
-                    "bigtool_enabled": self.bigtool_manager is not None,
-                    "official_supervisor": True
-                }
-        
-        # Files are available or not needed, proceed with normal processing
-        if stream:
-            return self._process_message_stream(message, thread_id)
+        # Enhance message with file context if files are available
+        if self.uploaded_files:
+            file_list = ", ".join([os.path.basename(f) for f in self.uploaded_files])
+            enhanced_message = f"{message}\n\n[Available files in conversation: {file_list}]"
         else:
-            return self._process_message_sync(message, thread_id)
-    
+            enhanced_message = message
+        
+        # Let the supervisor system handle requirement detection intelligently
+        # No preemptive keyword-based blocking - let agents determine what they need
+        
+        if stream:
+            return self._process_message_stream(enhanced_message, thread_id)
+        else:
+            return self._process_message_sync(enhanced_message, thread_id)
+
     def _process_message_sync(self, message: str, thread_id: str = None) -> Dict[str, Any]:
         """Synchronous processing (original behavior)."""
         try:
+            logger.info(f"🔄 SYNC PROCESSING: Starting message processing")
+            logger.info(f"📝 User Message: '{message[:100]}{'...' if len(message) > 100 else ''}'")
+            logger.info(f"🆔 Thread ID: {thread_id}")
+            logger.info(f"📁 Available Files: {len(self.uploaded_files)} files")
+            
             # Create config for checkpointer if available
             config = None
             if self.checkpointer and thread_id:
                 config = {"configurable": {"thread_id": thread_id}}
+                logger.info(f"💾 Using existing thread: {thread_id}")
             elif self.checkpointer:
-                config = {"configurable": {"thread_id": f"session_{hash(message) % 10000}"}}
+                new_thread_id = f"session_{hash(message) % 10000}"
+                config = {"configurable": {"thread_id": new_thread_id}}
+                logger.info(f"💾 Creating new thread: {new_thread_id}")
+            
+            # Create input with file context
+            input_data = {
+                "messages": [HumanMessage(content=message)],
+                "uploaded_files": self.uploaded_files  # Include file context
+            }
+            
+            logger.info("🎯 SUPERVISOR: Invoking supervisor system...")
+            logger.info(f"🔧 Available Agents: text_expert, image_expert, audio_expert, document_expert, video_expert")
+            logger.info(f"🧠 BigTool Status: {'Enabled' if self.bigtool_manager else 'Disabled'}")
             
             # Run the supervisor system
             if config:
-                result = self.app.invoke({
-                    "messages": [HumanMessage(content=message)]
-                }, config=config)
+                result = self.app.invoke(input_data, config=config)
             else:
-                result = self.app.invoke({
-                    "messages": [HumanMessage(content=message)]
-                })
+                result = self.app.invoke(input_data)
+            
+            logger.info("✅ SUPERVISOR: Processing completed")
             
             # Extract final response
             messages = result.get("messages", [])
+            logger.info(f"📨 Total Messages Generated: {len(messages)}")
+            
             if messages:
                 final_message = messages[-1]
                 final_answer = final_message.content if hasattr(final_message, 'content') else str(final_message)
+                logger.info(f"🎯 Final Response Length: {len(final_answer)} characters")
             else:
                 final_answer = "No response generated"
+                logger.warning("⚠️ No response generated by supervisor system")
             
             # Analyze which agents were involved
             agents_used = []
             bigtool_used = False
+            tool_calls_count = 0
             
-            for msg in messages:
+            for i, msg in enumerate(messages):
+                logger.debug(f"📨 Message {i+1}: Type={type(msg).__name__}")
+                
                 if hasattr(msg, 'name'):
+                    agent_name = msg.name
+                    logger.info(f"🤖 AGENT ACTIVITY: {agent_name} was active")
+                    
                     if msg.name == "text_expert":
                         agents_used.append("TEXT")
                     elif msg.name == "image_expert":
                         agents_used.append("IMAGE")
                     elif msg.name == "audio_expert":
                         agents_used.append("AUDIO")
+                    elif msg.name == "document_expert":
+                        agents_used.append("DOCUMENT")
+                    elif msg.name == "video_expert":
+                        agents_used.append("VIDEO")
+                
+                # Check for tool calls
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    tool_calls_count += len(msg.tool_calls)
+                    for tool_call in msg.tool_calls:
+                        tool_name = tool_call.get('name', 'unknown')
+                        logger.info(f"🔧 TOOL CALL: {tool_name}")
                 
                 # Check for BigTool usage indicators
-                if hasattr(msg, 'content') and 'BigTool' in str(msg.content):
+                if hasattr(msg, 'content') and msg.content and 'BigTool' in str(msg.content):
                     bigtool_used = True
+            
+            logger.info(f"🎯 AGENTS USED: {list(set(agents_used))}")
+            logger.info(f"🔧 TOOL CALLS: {tool_calls_count} total")
+            logger.info(f"🧠 BIGTOOL USAGE: {'Yes' if bigtool_used else 'No'}")
             
             return {
                 "final_answer": final_answer,
                 "agents_used": list(set(agents_used)),  # Remove duplicates
                 "processing_status": "completed",
                 "message_count": len(messages),
+                "uploaded_files": self.uploaded_files,  # Include in response
                 "bigtool_enabled": self.bigtool_manager is not None,
                 "bigtool_used": bigtool_used,
-                "official_supervisor": True
+                "official_supervisor": True,
+                "tool_calls": tool_calls_count
             }
             
         except Exception as e:
-            logger.error(f"Error in supervisor processing: {e}")
+            logger.error(f"❌ SYNC PROCESSING ERROR: {str(e)}")
+            logger.exception("Full error details:")
             return {
                 "final_answer": f"Error processing your request: {str(e)}",
                 "agents_used": [],
                 "processing_status": "error",
+                "uploaded_files": self.uploaded_files,
                 "bigtool_enabled": self.bigtool_manager is not None,
                 "official_supervisor": True
             }
-    
+
     def _process_message_stream(self, message: str, thread_id: str = None):
         """Streaming processing with real-time updates."""
         try:
+            logger.info(f"🌊 STREAM PROCESSING: Starting real-time processing")
+            logger.info(f"📝 User Message: '{message[:100]}{'...' if len(message) > 100 else ''}'")
+            logger.info(f"🆔 Thread ID: {thread_id}")
+            
             # Create config for checkpointer if available
             config = None
             if self.checkpointer and thread_id:
                 config = {"configurable": {"thread_id": thread_id}}
+                logger.info(f"💾 Using existing thread: {thread_id}")
             elif self.checkpointer:
-                config = {"configurable": {"thread_id": f"session_{hash(message) % 10000}"}}
+                new_thread_id = f"session_{hash(message) % 10000}"
+                config = {"configurable": {"thread_id": new_thread_id}}
+                logger.info(f"💾 Creating new thread: {new_thread_id}")
             
             # Initial status update with requirement check
             yield {
                 "type": "status",
-                "content": "🔍 Checking task requirements...",
+                "content": "🔍 Analyzing user request and checking requirements...",
                 "timestamp": self._get_timestamp(),
                 "agents_used": [],
                 "bigtool_enabled": self.bigtool_manager is not None
             }
             
+            logger.info("🔍 ANALYSIS: Checking task requirements")
+            
             # Show files if available
             if self.uploaded_files:
                 file_list = ", ".join([os.path.basename(f) for f in self.uploaded_files])
+                logger.info(f"📁 FILES AVAILABLE: {file_list}")
                 yield {
                     "type": "file_status",
                     "content": f"📁 Using files: {file_list}",
                     "timestamp": self._get_timestamp(),
                     "files": self.uploaded_files
                 }
+            else:
+                logger.info("📁 FILES: No files uploaded")
             
             yield {
                 "type": "status",
-                "content": "🔄 Initializing OASIS BigTool Supervisor...",
+                "content": "🔄 Initializing OASIS BigTool Supervisor System...",
                 "timestamp": self._get_timestamp(),
                 "agents_used": [],
                 "bigtool_enabled": self.bigtool_manager is not None
             }
             
+            logger.info("🎯 SUPERVISOR: Initializing supervisor system")
+            logger.info(f"🔧 Available Agents: text_expert, image_expert, audio_expert, document_expert, video_expert")
+            logger.info(f"🧠 BigTool Status: {'Enabled with ' + str(len(self.bigtool_manager.tool_registry)) + ' tools' if self.bigtool_manager else 'Disabled'}")
+            
             # Stream the graph execution
-            input_data = {"messages": [HumanMessage(content=message)]}
+            input_data = {
+                "messages": [HumanMessage(content=message)],
+                "uploaded_files": self.uploaded_files  # Include file context
+            }
             
             agents_involved = []
             tool_calls_made = []
+            handoffs_detected = []
+            
+            logger.info("🌊 STREAMING: Starting graph execution stream")
             
             if config:
                 stream_iter = self.app.stream(input_data, config=config, stream_mode="updates")
             else:
                 stream_iter = self.app.stream(input_data, stream_mode="updates")
             
-            for chunk in stream_iter:
+            for chunk_num, chunk in enumerate(stream_iter):
+                logger.debug(f"🌊 CHUNK {chunk_num + 1}: Processing stream chunk")
+                
                 try:
                     # Process each chunk from the stream
                     for node_name, node_output in chunk.items():
+                        logger.info(f"📡 NODE ACTIVITY: {node_name} is processing")
                         
                         # Supervisor routing updates
                         if node_name == "supervisor":
+                            logger.info("🎯 SUPERVISOR: Analyzing request and making routing decisions")
                             yield {
                                 "type": "supervisor_action",
-                                "content": f"🎯 Supervisor: Analyzing and routing request...",
+                                "content": f"🎯 Supervisor: Analyzing request and determining optimal agent routing...",
                                 "timestamp": self._get_timestamp(),
                                 "node": node_name
                             }
@@ -1239,28 +1690,37 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                             # Check for handoff decisions
                             if "messages" in node_output:
                                 messages = node_output["messages"]
-                                for msg in messages:
+                                for msg_idx, msg in enumerate(messages):
+                                    if hasattr(msg, 'content') and msg.content:
+                                        logger.debug(f"🎯 SUPERVISOR MESSAGE {msg_idx + 1}: {msg.content[:100]}...")
+                                    
                                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                         for tool_call in msg.tool_calls:
                                             tool_name = tool_call.get('name', 'unknown')
-                                            if 'transfer_to' in tool_name:
-                                                agent_type = tool_name.replace('transfer_to_', '').replace('_expert', '').upper()
+                                            logger.info(f"🎯 SUPERVISOR TOOL CALL: {tool_name}")
+                                            
+                                            if 'transfer_to' in tool_name or 'handoff' in tool_name:
+                                                agent_type = tool_name.replace('transfer_to_', '').replace('_expert', '').replace('handoff_to_', '').upper()
+                                                handoffs_detected.append(agent_type)
+                                                logger.info(f"📞 HANDOFF DETECTED: Transferring to {agent_type} agent")
                                                 yield {
                                                     "type": "handoff",
-                                                    "content": f"📞 Handoff: Transferring to {agent_type} agent...",
+                                                    "content": f"📞 Handoff: Supervisor transferring control to {agent_type} agent for specialized processing...",
                                                     "timestamp": self._get_timestamp(),
-                                                    "target_agent": agent_type
+                                                    "target_agent": agent_type,
+                                                    "reason": f"Task requires {agent_type.lower()} processing capabilities"
                                                 }
                         
                         # Agent execution updates
-                        elif node_name in ["text_expert", "image_expert", "audio_expert"]:
+                        elif node_name in ["text_expert", "image_expert", "audio_expert", "document_expert", "video_expert"]:
                             agent_type = node_name.replace("_expert", "").upper()
                             if agent_type not in agents_involved:
                                 agents_involved.append(agent_type)
+                                logger.info(f"🤖 AGENT ACTIVATION: {agent_type} agent starting execution")
                                 
                             yield {
                                 "type": "agent_start",
-                                "content": f"🤖 {agent_type} Agent: Starting task execution...",
+                                "content": f"🤖 {agent_type} Agent: Initializing and selecting optimal tools...",
                                 "timestamp": self._get_timestamp(),
                                 "agent": agent_type
                             }
@@ -1268,18 +1728,28 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                             # Check for tool calls
                             if "messages" in node_output:
                                 messages = node_output["messages"]
-                                for msg in messages:
+                                for msg_idx, msg in enumerate(messages):
+                                    logger.debug(f"🤖 {agent_type} MESSAGE {msg_idx + 1}: Processing")
+                                    
                                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                         for tool_call in msg.tool_calls:
                                             tool_name = tool_call.get('name', 'unknown_tool')
                                             tool_args = tool_call.get('args', {})
                                             
+                                            logger.info(f"🔧 {agent_type} TOOL EXECUTION: {tool_name}")
+                                            
                                             # Format tool arguments for display
                                             args_preview = self._format_tool_args(tool_args)
                                             
+                                            # Check if BigTool was used for selection
+                                            bigtool_indicator = ""
+                                            if self.bigtool_manager and any(keyword in tool_name.lower() for keyword in ['cloud', 'ai', 'vision', 'translation']):
+                                                bigtool_indicator = " (BigTool selected)"
+                                                logger.info(f"🧠 BIGTOOL: Intelligent tool selection used for {tool_name}")
+                                            
                                             yield {
                                                 "type": "tool_call",
-                                                "content": f"🔧 {agent_type} Agent: Executing {tool_name}{args_preview}",
+                                                "content": f"🔧 {agent_type} Agent: Executing {tool_name}{args_preview}{bigtool_indicator}",
                                                 "timestamp": self._get_timestamp(),
                                                 "agent": agent_type,
                                                 "tool": tool_name,
@@ -1294,7 +1764,8 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                                     
                                     # Show agent response content
                                     if hasattr(msg, 'content') and msg.content:
-                                        content_preview = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+                                        content_preview = msg.content[:150] + "..." if len(msg.content) > 150 else msg.content
+                                        logger.info(f"📝 {agent_type} RESPONSE: {content_preview}")
                                         yield {
                                             "type": "agent_response",
                                             "content": f"📝 {agent_type} Agent: {content_preview}",
@@ -1302,72 +1773,89 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                                             "agent": agent_type,
                                             "full_content": msg.content
                                         }
+                        
+                        # Any other node types
+                        else:
+                            logger.debug(f"📡 OTHER NODE: {node_name} active")
                 
                 except Exception as chunk_error:
+                    logger.error(f"❌ CHUNK ERROR: {str(chunk_error)}")
                     yield {
                         "type": "error",
                         "content": f"⚠️ Error processing chunk: {str(chunk_error)}",
                         "timestamp": self._get_timestamp()
                     }
             
+            logger.info("✅ STREAMING: Graph execution completed")
+            logger.info(f"🎯 FINAL STATS: {len(agents_involved)} agents, {len(tool_calls_made)} tools, {len(handoffs_detected)} handoffs")
+            
             # Final completion status
             yield {
                 "type": "completion",
-                "content": "✅ Task completed successfully!",
+                "content": "✅ Task completed successfully! All agents have finished processing.",
                 "timestamp": self._get_timestamp(),
                 "agents_used": agents_involved,
                 "tool_calls": len(tool_calls_made),
+                "handoffs": len(handoffs_detected),
                 "bigtool_enabled": self.bigtool_manager is not None
             }
             
         except Exception as e:
-            logger.error(f"Error in streaming processing: {e}")
+            logger.error(f"❌ STREAM PROCESSING ERROR: {str(e)}")
+            logger.exception("Full streaming error details:")
             yield {
                 "type": "error",
                 "content": f"❌ Processing error: {str(e)}",
                 "timestamp": self._get_timestamp(),
                 "error": str(e)
             }
-    
+
     def _get_timestamp(self) -> str:
         """Get current timestamp for streaming updates."""
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    
-    def _get_category_keywords(self, category: str) -> List[str]:
-        """Get keywords that indicate a specific category."""
-        keywords = {
-            "text": ["translate", "summarize", "analyze text", "sentiment", "language", "write", "format"],
-            "image": ["image", "picture", "photo", "generate image", "enhance photo", "visual", "segment"],
-            "audio": ["audio", "sound", "music", "voice", "transcribe", "speech", "noise", "enhance audio"]
-        }
-        return keywords.get(category, [])
-    
-    def _format_tool_args(self, args: Dict[str, Any]) -> str:
-        """Format tool arguments for display."""
+
+    def _format_tool_args(self, args):
+        """Format tool arguments for display in streaming updates."""
         if not args:
             return ""
         
-        # Create a preview of arguments
-        preview_items = []
+        # Format common argument types for better display
+        formatted_args = []
         for key, value in args.items():
-            if isinstance(value, str) and len(value) > 30:
-                preview_items.append(f"{key}='{value[:30]}...'")
+            if isinstance(value, str):
+                # Truncate long strings
+                if len(value) > 50:
+                    display_value = f'"{value[:47]}..."'
+                else:
+                    display_value = f'"{value}"'
+            elif isinstance(value, (list, dict)):
+                # Show structure without full content
+                display_value = f"{type(value).__name__}({len(value)} items)" if hasattr(value, '__len__') else str(type(value).__name__)
             else:
-                preview_items.append(f"{key}={repr(value)}")
+                display_value = str(value)
+            
+            formatted_args.append(f"{key}={display_value}")
         
-        if len(preview_items) <= 2:
-            return f"({', '.join(preview_items)})"
-        else:
-            return f"({', '.join(preview_items[:2])}, ...)"
+        return f" ({', '.join(formatted_args)})"
     
-    def search_tools(self, query: str, category: str = None) -> List[Dict[str, Any]]:
-        """Search for tools using BigTool capabilities."""
+    def search_tools(self, query: str, category: str = None, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for tools using MongoDB Atlas Vector Search or simple text search.
+        
+        Args:
+            query: Search query describing the desired functionality
+            category: Optional category filter (text, image, audio, document, video, system)
+            limit: Maximum number of tools to return
+            
+        Returns:
+            List of tool information dictionaries
+        """
         if self.bigtool_manager:
-            return self.bigtool_manager.search_tools(query, category)
+            return self.bigtool_manager.search_tools(query, category, limit)
         else:
             return []
-    
+
     def get_capabilities(self) -> Dict[str, Any]:
         """Get comprehensive information about OASIS capabilities."""
         total_tools = 0
@@ -1379,9 +1867,11 @@ Be intelligent about routing - analyze what the user actually needs and leverage
             "architecture": "Official LangGraph Supervisor Pattern + MongoDB Atlas Vector Search + Vertex AI Embeddings",
             "agents": {
                 "supervisor": "Official LangGraph supervisor with handoff coordination",
-                "text_expert": "Translation, summarization, sentiment analysis with intelligent tool selection",
+                "text_expert": "Translation, summarization, sentiment analysis, speech processing with intelligent tool selection",
                 "image_expert": "Recognition, generation, enhancement with intelligent tool selection",
-                "audio_expert": "Transcription, synthesis, denoising, analysis with intelligent tool selection"
+                "audio_expert": "Transcription, synthesis, denoising, analysis with intelligent tool selection",
+                "document_expert": "Document AI, OCR, PDF processing, form analysis with intelligent tool selection",
+                "video_expert": "Video Intelligence, scene detection, media translation with intelligent tool selection"
             },
             "features": {
                 "multi_modal": True,
@@ -1402,10 +1892,22 @@ Be intelligent about routing - analyze what the user actually needs and leverage
 
     def set_uploaded_files(self, files: List[str]) -> None:
         """Set uploaded files for the agent."""
-        self.uploaded_files = files
+        # Filter out None and empty strings, ensure all are valid paths
+        valid_files = [f for f in files if f and os.path.exists(f)]
+        self.uploaded_files = valid_files
+        
         # Also set the files for the path resolution function
-        _resolve_file_path._uploaded_files = files
-        logger.info(f"📁 Updated uploaded files: {len(files)} files")
+        _resolve_file_path._uploaded_files = valid_files
+        
+        logger.info(f"📁 Updated uploaded files: {len(valid_files)} files")
+        if valid_files:
+            for i, file_path in enumerate(valid_files, 1):
+                logger.info(f"  {i}. {os.path.basename(file_path)} -> {file_path}")
+        else:
+            logger.info("  (no valid files)")
+        
+        # Force update the global file list for all tools
+        globals()['_current_uploaded_files'] = valid_files
 
     def get_uploaded_files(self) -> list:
         """Get the current list of uploaded files."""
@@ -1451,185 +1953,28 @@ Be intelligent about routing - analyze what the user actually needs and leverage
         return self._get_fallback_tools(category)
     
     def _get_fallback_tools(self, category: str) -> List:
-        """Get fallback tools when BigTool is not available."""
+        """Get fallback tools for a specific category when BigTool is not available."""
         if category == "text":
-            return [text_summarization, text_translation, text_analysis, advanced_text_processing, text_formatting]
+            return [
+                text_summarization, text_translation, text_analysis,
+                advanced_text_processing, text_formatting, document_analysis
+            ] + get_text_tools()
         elif category == "image":
-            return [image_recognition, image_generation, image_enhancement, image_segmentation, image_style_transfer]
+            return [
+                image_recognition, image_generation, image_enhancement,
+                image_segmentation, image_style_transfer, ocr_text_extraction
+            ]
         elif category == "audio":
-            base_tools = [audio_transcription, audio_synthesis, audio_analysis, audio_enhancement, music_analysis]
-            return base_tools + get_denoise_tools()
+            return [
+                audio_transcription, audio_synthesis, audio_analysis,
+                audio_enhancement, music_analysis
+            ] + get_denoise_tools()
+        elif category == "document":
+            return get_document_tools()
+        elif category == "video":
+            return get_video_tools()
+        elif category == "system":
+            return [get_system_info, get_file_info, request_file_upload, debug_file_access]
         else:
+            logger.warning(f"Unknown tool category: {category}")
             return []
-    
-    def _create_text_agent(self, user_query: str = ""):
-        """Create a text processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("text", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="text_expert"
-        )
-    
-    def _create_image_agent(self, user_query: str = ""):
-        """Create an image processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("image", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="image_expert"
-        )
-    
-    def _create_audio_agent(self, user_query: str = ""):
-        """Create an audio processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("audio", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="audio_expert"
-        )
-
-
-# Test section for direct execution
-if __name__ == "__main__":
-    """
-    Test the OASIS supervisor multi-agent system with BigTool integration when run directly.
-    """
-    print("🚀 Initializing OASIS Official Supervisor Multi-Agent System with BigTool and Vertex AI...")
-    
-    try:
-        # Check if supervisor is available
-        if not SUPERVISOR_AVAILABLE:
-            print("❌ langgraph_supervisor not available.")
-            print("📦 Please install: pip install langgraph-supervisor")
-            exit(1)
-        
-        # Initialize the agent with BigTool
-        agent = OASISAgent(use_memory=True, use_bigtool=True)
-        
-        print("✅ OASIS Agent initialized successfully!")
-        capabilities = agent.get_capabilities()
-        print(f"🤖 System capabilities: {capabilities}")
-        
-        # Test BigTool search functionality
-        if agent.bigtool_manager:
-            print("\n🔍 Testing BigTool search functionality...")
-            search_results = agent.search_tools("noise reduction audio", category="audio")
-            print(f"Found {len(search_results)} tools for 'noise reduction audio':")
-            for result in search_results[:3]:
-                print(f"  - {result['name']}: {result['description'][:60]}...")
-        
-        # Test a simple request first
-        print("\n🧪 Running initial test...")
-        test_message = "Hello! Can you tell me about your capabilities?"
-        
-        result = agent.process_message(test_message, thread_id="test_session")
-        print(f"📝 Test Result: {result['final_answer'][:150]}...")
-        print(f"🔧 Agents Used: {result.get('agents_used', [])}")
-        print(f"📊 Processing Status: {result['processing_status']}")
-        print(f"🧠 BigTool Enabled: {result.get('bigtool_enabled', False)}")
-        
-        # Interactive testing mode
-        print("\n🎮 Interactive OASIS BigTool Testing Mode with Vertex AI")
-        print("=" * 80)
-        print("Enter your messages to test the supervisor multi-agent system with BigTool and Vertex AI!")
-        print("Note: System uses Vertex AI Gemini-1.5-Pro only (no fallback)")
-        print("Try examples like:")
-        print("  - 'Translate Hello World to Spanish and analyze sentiment'")
-        print("  - 'Generate an image of a sunset and describe it'") 
-        print("  - 'Transcribe audio.mp3 and create a summary'")
-        print("  - 'Remove noise from my audio file and enhance quality'")
-        print("  - 'Analyze this image and create an audio description'")
-        print("\nCommands:")
-        print("  - Type 'stream on' to enable streaming mode (real-time updates)")
-        print("  - Type 'stream off' to disable streaming mode") 
-        print("  - Type 'quit' to exit")
-        print("=" * 80)
-        
-        session_id = "interactive_session"
-        streaming_mode = True  # Default to streaming for better UX
-        print(f"🌊 Streaming mode: {'ON' if streaming_mode else 'OFF'}")
-        
-        while True:
-            try:
-                user_input = input("\n💬 Your message: ").strip()
-                
-                if user_input.lower() in ['quit', 'exit', 'q']:
-                    print("👋 Goodbye!")
-                    break
-                
-                if user_input.lower() == 'stream on':
-                    streaming_mode = True
-                    print("🌊 Streaming mode enabled - you'll see real-time updates!")
-                    continue
-                
-                if user_input.lower() == 'stream off':
-                    streaming_mode = False
-                    print("📄 Streaming mode disabled - you'll see final results only")
-                    continue
-                
-                if not user_input:
-                    print("⚠️ Please enter a message")
-                    continue
-                
-                if streaming_mode:
-                    print(f"\n🌊 Streaming OASIS BigTool Processing: '{user_input}'")
-                    print("-" * 60)
-                    
-                    # Process with streaming
-                    agents_used = []
-                    tool_calls = 0
-                    final_content = ""
-                    
-                    for update in agent.process_message(user_input, thread_id=session_id, stream=True):
-                        timestamp = update.get('timestamp', '')
-                        content = update.get('content', '')
-                        
-                        # Display the update
-                        print(f"[{timestamp}] {content}")
-                        
-                        # Track metadata
-                        if update.get('type') == 'agent_start' and update.get('agent'):
-                            if update['agent'] not in agents_used:
-                                agents_used.append(update['agent'])
-                        
-                        if update.get('type') == 'tool_call':
-                            tool_calls += 1
-                        
-                        if update.get('type') == 'agent_response':
-                            final_content = update.get('full_content', content)
-                        
-                        if update.get('type') == 'completion':
-                            print(f"\n📊 Final Status:")
-                            print(f"   🔧 Agents Used: {agents_used}")
-                            print(f"   🛠️ Tool Calls: {tool_calls}")
-                            print(f"   🧠 BigTool: {update.get('bigtool_enabled', False)}")
-                            if final_content:
-                                print(f"   📝 Final Response: {final_content[:100]}...")
-                
-                else:
-                    print(f"\n📄 Processing with OASIS BigTool Supervisor: '{user_input}'")
-                    result = agent.process_message(user_input, thread_id=session_id, stream=False)
-                    
-                    print(f"\n📝 OASIS Response: {result['final_answer']}")
-                    print(f"🔧 Agents Involved: {result.get('agents_used', [])}")
-                    print(f"💬 Messages in Thread: {result.get('message_count', 0)}")
-                    print(f"📊 Status: {result['processing_status']}")
-                    print(f"🧠 BigTool Used: {result.get('bigtool_used', False)}")
-                
-            except KeyboardInterrupt:
-                print("\n👋 Exiting OASIS...")
-                break
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                continue
-        
-        print("\n✨ OASIS BigTool Supervisor Multi-Agent System testing completed!")
-        
-    except Exception as e:
-        print(f"❌ Error during initialization: {e}")
-        import traceback
-        traceback.print_exc()
