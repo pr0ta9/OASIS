@@ -129,7 +129,17 @@ def text_formatting(text: str, format_type: str) -> str:
 @tool
 def image_recognition(image_path: str) -> str:
     """Perform object recognition and scene understanding on image."""
-    return f"Objects detected in {image_path}: person (0.95), car (0.87), tree (0.82), building (0.76)"
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(image_path)
+    if not resolved_path:
+        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+    
+    # For now, return a placeholder since this is a mock tool
+    # In a real implementation, this would use actual image recognition
+    return f"🖼️ Image analysis for {os.path.basename(resolved_path)}:\n" \
+           f"• Objects detected: text/writing (0.95), background (0.87), foreground elements (0.82)\n" \
+           f"• Scene type: Document/text image\n" \
+           f"• Recommended action: Use OCR for text extraction and translation"
 
 @tool
 def image_generation(prompt: str, style: str = "realistic") -> str:
@@ -139,17 +149,79 @@ def image_generation(prompt: str, style: str = "realistic") -> str:
 @tool
 def image_enhancement(image_path: str, enhancement_type: str = "auto") -> str:
     """Enhance image quality, brightness, contrast, and sharpness."""
-    return f"Enhanced {image_path} with {enhancement_type} improvements, saved as 'enhanced_{image_path}'"
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(image_path)
+    if not resolved_path:
+        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+    
+    return f"✅ Enhanced {os.path.basename(resolved_path)} with {enhancement_type} improvements. The image has been processed for better clarity and quality."
 
 @tool
 def image_segmentation(image_path: str) -> str:
     """Perform semantic segmentation on images to identify different regions."""
-    return f"Segmented {image_path}: Found 5 regions - sky (25%), building (40%), road (20%), vegetation (10%), vehicle (5%)"
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(image_path)
+    if not resolved_path:
+        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+    
+    return f"🎯 Segmented {os.path.basename(resolved_path)}: Found distinct regions including text areas, background, and visual elements"
 
 @tool
 def image_style_transfer(image_path: str, style: str) -> str:
     """Apply artistic style transfer to images."""
-    return f"Applied {style} style to {image_path}, created artistic version saved as 'styled_{image_path}'"
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(image_path)
+    if not resolved_path:
+        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+    
+    return f"🎨 Applied {style} style to {os.path.basename(resolved_path)}, created artistic version"
+
+@tool
+def ocr_text_extraction(image_path: str, language: str = "auto") -> str:
+    """Extract text from images using OCR (Optical Character Recognition)."""
+    # Try to resolve file path if only filename is provided
+    resolved_path = _resolve_file_path(image_path)
+    if not resolved_path:
+        return f"❌ File not found: {image_path}. Please make sure the file is uploaded correctly."
+    
+    # For now, return a placeholder since this is a mock tool
+    # In a real implementation, this would use actual OCR like Tesseract
+    filename = os.path.basename(resolved_path)
+    
+    # Simulate OCR extraction with some example text that might be found in various languages
+    sample_texts = {
+        "auto": "📄 Text extracted from " + filename + ":\n\n\"Hello, this is sample text that would be extracted from the image. This could be in any language depending on the image content.\"",
+        "en": "📄 English text extracted from " + filename + ":\n\n\"Sample English text from the image.\"",
+        "es": "📄 Spanish text extracted from " + filename + ":\n\n\"Hola, este es un texto de ejemplo que se extraería de la imagen.\"",
+        "fr": "📄 French text extracted from " + filename + ":\n\n\"Bonjour, ceci est un exemple de texte qui serait extrait de l'image.\"",
+        "de": "📄 German text extracted from " + filename + ":\n\n\"Hallo, dies ist ein Beispieltext, der aus dem Bild extrahiert würde.\"",
+        "zh": "📄 Chinese text extracted from " + filename + ":\n\n\"你好，这是从图像中提取的示例文本。\"",
+        "ja": "📄 Japanese text extracted from " + filename + ":\n\n\"こんにちは、これは画像から抽出されるサンプルテキストです。\"",
+        "ko": "📄 Korean text extracted from " + filename + ":\n\n\"안녕하세요, 이것은 이미지에서 추출될 샘플 텍스트입니다.\"",
+    }
+    
+    return sample_texts.get(language, sample_texts["auto"])
+
+def _resolve_file_path(file_path: str) -> str:
+    """
+    Resolve a file path by checking if it exists directly, or if it's just a filename,
+    try to find it in the current agent's uploaded files list.
+    """
+    # If the path exists directly, return it
+    if os.path.exists(file_path):
+        return file_path
+    
+    # If it's just a filename, try to find it in uploaded files
+    # This will be set by the agent when processing uploaded files
+    if hasattr(_resolve_file_path, '_uploaded_files') and _resolve_file_path._uploaded_files:
+        filename = os.path.basename(file_path)
+        for uploaded_path in _resolve_file_path._uploaded_files:
+            if os.path.basename(uploaded_path) == filename:
+                if os.path.exists(uploaded_path):
+                    return uploaded_path
+    
+    # File not found
+    return None
 
 # Audio Processing Tools
 @tool
@@ -193,31 +265,32 @@ def get_system_info() -> str:
 
 @tool
 def get_file_info(file_path: str) -> str:
-    """Get detailed information about a file for processing."""
+    """Get information about a file."""
     try:
-        from pathlib import Path
-        path = Path(file_path)
-        if not path.exists():
-            return f"File {file_path} does not exist."
+        if not file_path or not os.path.exists(file_path):
+            return f"❌ File not found: {file_path}"
         
-        size = path.stat().st_size
-        suffix = path.suffix.lower()
+        file_stats = os.stat(file_path)
+        file_size = file_stats.st_size
+        file_ext = os.path.splitext(file_path)[1].lower()
         
-        # Determine file type and available processing
-        if suffix in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
-            processing = "Image: recognition, enhancement, generation, segmentation, style transfer"
-        elif suffix in ['.mp3', '.wav', '.flac', '.aac']:
-            processing = "Audio: transcription, analysis, synthesis, enhancement, music analysis"
-        elif suffix in ['.pdf', '.txt', '.docx']:
-            processing = "Text: extraction, analysis, translation, summarization, formatting"
-        elif suffix in ['.mp4', '.avi', '.mov']:
-            processing = "Video: audio extraction, analysis, enhancement"
+        # Human readable file size
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if file_size < 1024.0:
+                size_str = f"{file_size:.1f} {unit}"
+                break
+            file_size /= 1024.0
         else:
-            processing = "Multi-modal processing available"
+            size_str = f"{file_size:.1f} TB"
         
-        return f"File: {file_path}\nSize: {size} bytes\nType: {suffix}\nProcessing: {processing}"
+        return f"📄 File: {os.path.basename(file_path)}\n📁 Path: {file_path}\n�� Size: {size_str}\n🏷️  Type: {file_ext or 'No extension'}"
     except Exception as e:
-        return f"Error analyzing file: {str(e)}"
+        return f"❌ Error reading file info: {str(e)}"
+
+@tool
+def request_file_upload(file_types: str, purpose: str, details: str = "") -> str:
+    """Request user to upload specific file types for task completion."""
+    return f"📤 UPLOAD_REQUEST: {file_types}|{purpose}|{details}"
 
 
 class BigToolManager:
@@ -580,26 +653,215 @@ class BigToolManager:
         ]
 
 
+class RequirementAnalyzer:
+    """Intelligent requirement analysis for detecting missing files and information."""
+    
+    def __init__(self):
+        self.file_patterns = {
+            'image': {
+                'keywords': ['image', 'picture', 'photo', 'screenshot', 'visual', 'see', 'look', 'analyze image', 'ocr', 'text in image', 'read image', 'translate image', 'enhance image', 'improve photo'],
+                'strong_keywords': ['image', 'picture', 'photo', 'screenshot', 'ocr', 'text in image', 'read image', 'translate image'],
+                'extensions': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'],
+                'description': 'image file (JPG, PNG, GIF, etc.)'
+            },
+            'audio': {
+                'keywords': ['audio', 'sound', 'music', 'voice', 'speech', 'transcribe', 'listen', 'hear', 'mp3', 'wav', 'recording', 'transcribe audio'],
+                'strong_keywords': ['audio', 'transcribe', 'recording', 'transcribe audio', 'audio recording'],
+                'extensions': ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'],
+                'description': 'audio file (MP3, WAV, FLAC, etc.)'
+            },
+            'document': {
+                'keywords': ['document', 'pdf', 'doc', 'file', 'read', 'analyze document', 'summarize document', 'text file'],
+                'strong_keywords': ['document', 'pdf', 'doc', 'summarize document', 'analyze document'],
+                'extensions': ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt'],
+                'description': 'document file (PDF, DOC, TXT, etc.)'
+            },
+            'video': {
+                'keywords': ['video', 'movie', 'clip', 'mp4', 'avi', 'watch', 'analyze video'],
+                'strong_keywords': ['video', 'movie', 'clip', 'analyze video'],
+                'extensions': ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv'],
+                'description': 'video file (MP4, AVI, MOV, etc.)'
+            }
+        }
+    
+    def analyze_requirements(self, user_message: str, available_files: list = None) -> dict:
+        """Analyze user message to determine what files or information are needed."""
+        if available_files is None:
+            available_files = []
+        
+        message_lower = user_message.lower()
+        requirements = {
+            'needs_files': False,
+            'missing_files': [],
+            'has_required_files': True,
+            'analysis': {
+                'detected_intent': [],
+                'required_file_types': [],
+                'suggestions': []
+            }
+        }
+        
+        # First pass: detect strong indicators
+        strong_matches = {}
+        for file_type, config in self.file_patterns.items():
+            strong_score = sum(1 for keyword in config['strong_keywords'] if keyword in message_lower)
+            weak_score = sum(1 for keyword in config['keywords'] if keyword in message_lower and keyword not in config['strong_keywords'])
+            
+            # Calculate confidence score
+            confidence = strong_score * 2 + weak_score
+            strong_matches[file_type] = confidence
+        
+        # Only include file types with sufficient confidence
+        for file_type, confidence in strong_matches.items():
+            config = self.file_patterns[file_type]
+            
+            # Require at least one strong keyword or multiple weak keywords
+            if confidence >= 2 or any(keyword in message_lower for keyword in config['strong_keywords']):
+                requirements['analysis']['detected_intent'].append(file_type)
+                requirements['analysis']['required_file_types'].append(file_type)
+                
+                # Check if we have files of this type available
+                has_this_type = False
+                if available_files:
+                    for file_path in available_files:
+                        file_ext = os.path.splitext(file_path)[1].lower()
+                        if file_ext in config['extensions']:
+                            has_this_type = True
+                            break
+                
+                if not has_this_type:
+                    requirements['needs_files'] = True
+                    requirements['missing_files'].append({
+                        'type': file_type,
+                        'description': config['description'],
+                        'extensions': config['extensions'],
+                        'reason': self._generate_reason(message_lower, file_type),
+                        'confidence': confidence
+                    })
+        
+        # Special case analysis for complex requests
+        self._analyze_complex_patterns(message_lower, requirements)
+        
+        # Set overall status
+        requirements['has_required_files'] = not bool(requirements['missing_files'])
+        
+        return requirements
+    
+    def _generate_reason(self, message: str, file_type: str) -> str:
+        """Generate human-readable reason for why this file type is needed."""
+        reasons = {
+            'image': {
+                'ocr': "to read and extract text from the image",
+                'text in image': "to read the text content in the image", 
+                'translate': "to translate the text shown in the image",
+                'analyze': "to analyze the visual content",
+                'see': "to examine the visual content",
+                'look': "to examine what's shown in the image",
+                'default': "to process the visual content"
+            },
+            'audio': {
+                'transcribe': "to convert speech to text",
+                'listen': "to analyze the audio content",
+                'music': "to analyze the musical content",
+                'voice': "to process the voice recording",
+                'default': "to process the audio content"
+            },
+            'document': {
+                'summarize': "to create a summary of the document",
+                'analyze': "to analyze the document content",
+                'read': "to read and process the document",
+                'default': "to process the document content"
+            },
+            'video': {
+                'analyze': "to analyze the video content",
+                'watch': "to examine the video content",
+                'default': "to process the video content"
+            }
+        }
+        
+        file_reasons = reasons.get(file_type, {})
+        for keyword, reason in file_reasons.items():
+            if keyword != 'default' and keyword in message:
+                return reason
+        
+        return file_reasons.get('default', f"to process the {file_type}")
+    
+    def _analyze_complex_patterns(self, message: str, requirements: dict):
+        """Analyze complex patterns that might need multiple file types or special handling."""
+        
+        # Pattern: "translate the words in this image" - needs image + OCR
+        if any(phrase in message for phrase in ['translate', 'words in', 'text in']):
+            if 'image' in requirements['analysis']['detected_intent']:
+                for missing in requirements['missing_files']:
+                    if missing['type'] == 'image':
+                        missing['reason'] = "to extract and translate the text shown in the image"
+        
+        # Pattern: "compare these files" - needs multiple files
+        if any(phrase in message for phrase in ['compare', 'difference', 'similarity']):
+            requirements['analysis']['suggestions'].append("You may need to upload multiple files for comparison")
+        
+        # Pattern: "convert" requests - often need source files
+        if 'convert' in message:
+            requirements['analysis']['suggestions'].append("You'll need to upload the file you want to convert")
+    
+    def generate_upload_request(self, missing_files: list) -> str:
+        """Generate a user-friendly request for file uploads."""
+        if not missing_files:
+            return ""
+        
+        if len(missing_files) == 1:
+            file_info = missing_files[0]
+            return f"I need an {file_info['description']} {file_info['reason']}. Please upload the file and then I'll help you with your request."
+        else:
+            file_types = [f['description'] for f in missing_files]
+            return f"I need the following files to help you:\n" + \
+                   "\n".join([f"• {info['description']} {info['reason']}" for info in missing_files]) + \
+                   "\n\nPlease upload these files and then I'll process your request."
+
+
 class OASISAgent:
     """
-    Enhanced OASIS agent using official LangGraph supervisor pattern with BigTool integration.
+    OASIS Agent with multi-agent supervisor system and BigTool integration.
     """
     
     def __init__(self, mongodb_uri: str = None, use_memory: bool = True, use_bigtool: bool = True):
-        """Initialize the OASIS agent with official supervisor pattern and BigTool."""
-        self.mongodb_uri = mongodb_uri or settings.mongo_uri
+        """Initialize the OASIS Agent with supervisor system."""
+        logger.info("🚀 Initializing OASIS Agent with supervisor system...")
+        
+        self.settings = self._get_settings()
+        self.mongodb_uri = mongodb_uri or self.settings.mongo_uri
         self.use_memory = use_memory
         self.use_bigtool = use_bigtool
+        
+        # Core components
         self.llm = None
-        self.app = None
         self.checkpointer = None
         self.bigtool_manager = None
+        self.app = None
         
+        # Add requirement analyzer
+        self.requirement_analyzer = RequirementAnalyzer()
+        self.uploaded_files = []  # Track uploaded files
+        
+        # Initialize components
         self._setup_llm()
-        self._setup_memory()
-        self._setup_bigtool()
+        if self.use_memory:
+            self._setup_memory()
+        if self.use_bigtool:
+            self._setup_bigtool()
+        
+        # Build the supervisor system
         self._build_supervisor_system()
     
+    def _get_settings(self):
+        """Get settings object with fallback."""
+        try:
+            from config.settings import settings
+            return settings
+        except ImportError:
+            # Fallback settings
+            return FallbackSettings()
+
     def _setup_llm(self) -> None:
         """Initialize the LLM with Vertex AI Gemini only."""
         try:
@@ -608,7 +870,7 @@ class OASISAgent:
                 raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable is required for Vertex AI")
             
             # Get region from settings
-            region = getattr(settings, 'google_cloud_region', 'us-central1')
+            region = getattr(self.settings, 'google_cloud_region', 'us-central1')
             
             # Use Vertex AI Gemini 2.0 Flash (latest model)
             self.llm = ChatVertexAI(
@@ -623,7 +885,7 @@ class OASISAgent:
             logger.warning(f"⚠️ Failed to initialize gemini-2.0-flash-001, trying fallback...")
             try:
                 # Fallback to Gemini 1.5 Pro
-                region = getattr(settings, 'google_cloud_region', 'us-central1')
+                region = getattr(self.settings, 'google_cloud_region', 'us-central1')
                 self.llm = ChatVertexAI(
                     model_name="gemini-1.5-pro-001",  # Stable 1.5 Pro version
                     temperature=0.1,
@@ -702,82 +964,6 @@ class OASISAgent:
         else:
             logger.info("ℹ️ BigTool disabled or MongoDB not available")
             self.bigtool_manager = None
-    
-    def _get_intelligent_tools(self, category: str, user_query: str = "") -> List:
-        """Get intelligently selected tools for a specific category using BigTool."""
-        if self.bigtool_manager and user_query:
-            # Use BigTool for intelligent selection
-            tool_matches = self.bigtool_manager.search_tools(
-                query=user_query,
-                category=category,
-                limit=5
-            )
-            
-            # Convert to tool instances
-            tools = []
-            for match in tool_matches:
-                tool_instance = self.bigtool_manager.get_tool_by_id(
-                    next(tid for tid, tinfo in self.bigtool_manager.tool_registry.items() 
-                         if tinfo["tool"] == match["tool"])
-                )
-                if tool_instance:
-                    tools.append(tool_instance)
-            
-            if tools:
-                logger.info(f"🧠 BigTool selected {len(tools)} {category} tools for query: '{user_query[:50]}...'")
-                return tools
-        
-        # Fallback to all tools in category
-        if self.bigtool_manager:
-            category_tools = self.bigtool_manager.get_tools_by_category(category)
-            tools = [tool_info["tool"] for tool_info in category_tools]
-            logger.info(f"📋 Using all {len(tools)} {category} tools (fallback)")
-            return tools
-        
-        # Final fallback to hardcoded tools
-        return self._get_fallback_tools(category)
-    
-    def _get_fallback_tools(self, category: str) -> List:
-        """Get fallback tools when BigTool is not available."""
-        if category == "text":
-            return [text_summarization, text_translation, text_analysis, advanced_text_processing, text_formatting]
-        elif category == "image":
-            return [image_recognition, image_generation, image_enhancement, image_segmentation, image_style_transfer]
-        elif category == "audio":
-            base_tools = [audio_transcription, audio_synthesis, audio_analysis, audio_enhancement, music_analysis]
-            return base_tools + get_denoise_tools()
-        else:
-            return []
-    
-    def _create_text_agent(self, user_query: str = ""):
-        """Create a text processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("text", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="text_expert"
-        )
-    
-    def _create_image_agent(self, user_query: str = ""):
-        """Create an image processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("image", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="image_expert"
-        )
-    
-    def _create_audio_agent(self, user_query: str = ""):
-        """Create an audio processing agent with intelligently selected tools."""
-        tools = self._get_intelligent_tools("audio", user_query)
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=tools,
-            name="audio_expert"
-        )
     
     def _build_supervisor_system(self) -> None:
         """Build the complete supervisor system using official LangGraph supervisor."""
@@ -867,18 +1053,57 @@ Be intelligent about routing - analyze what the user actually needs and leverage
             logger.error(f"❌ Failed to build supervisor system: {e}")
             raise
     
-    def process_message(self, message: str, thread_id: str = None, stream: bool = False):
+    def process_message(self, message: str, thread_id: str = None, stream: bool = False, uploaded_files: list = None):
         """
-        Process a user message using the supervisor system with BigTool intelligence.
+        Process a user message using the supervisor system with intelligent requirement checking.
         
         Args:
             message: User's input message
             thread_id: Optional thread ID for conversation persistence
             stream: Whether to return streaming updates or final result
+            uploaded_files: List of uploaded file paths
             
         Returns:
             Generator of updates if stream=True, otherwise Dict with final result
         """
+        # Update uploaded files list
+        if uploaded_files:
+            self.uploaded_files = uploaded_files
+        
+        # Analyze requirements before processing
+        requirements = self.requirement_analyzer.analyze_requirements(message, self.uploaded_files)
+        
+        # If files are missing, return requirement request instead of processing
+        if requirements['needs_files'] and not requirements['has_required_files']:
+            upload_request = self.requirement_analyzer.generate_upload_request(requirements['missing_files'])
+            
+            if stream:
+                def requirement_stream():
+                    yield {
+                        "type": "requirement_check",
+                        "content": "🔍 Analyzing task requirements...",
+                        "timestamp": self._get_timestamp()
+                    }
+                    yield {
+                        "type": "file_required",
+                        "content": upload_request,
+                        "timestamp": self._get_timestamp(),
+                        "missing_files": requirements['missing_files'],
+                        "requires_upload": True
+                    }
+                return requirement_stream()
+            else:
+                return {
+                    "final_answer": upload_request,
+                    "agents_used": [],
+                    "processing_status": "awaiting_files",
+                    "missing_files": requirements['missing_files'],
+                    "requires_upload": True,
+                    "bigtool_enabled": self.bigtool_manager is not None,
+                    "official_supervisor": True
+                }
+        
+        # Files are available or not needed, proceed with normal processing
         if stream:
             return self._process_message_stream(message, thread_id)
         else:
@@ -959,42 +1184,31 @@ Be intelligent about routing - analyze what the user actually needs and leverage
             elif self.checkpointer:
                 config = {"configurable": {"thread_id": f"session_{hash(message) % 10000}"}}
             
-            # Initial status update
+            # Initial status update with requirement check
+            yield {
+                "type": "status",
+                "content": "🔍 Checking task requirements...",
+                "timestamp": self._get_timestamp(),
+                "agents_used": [],
+                "bigtool_enabled": self.bigtool_manager is not None
+            }
+            
+            # Show files if available
+            if self.uploaded_files:
+                file_list = ", ".join([os.path.basename(f) for f in self.uploaded_files])
+                yield {
+                    "type": "file_status",
+                    "content": f"📁 Using files: {file_list}",
+                    "timestamp": self._get_timestamp(),
+                    "files": self.uploaded_files
+                }
+            
             yield {
                 "type": "status",
                 "content": "🔄 Initializing OASIS BigTool Supervisor...",
                 "timestamp": self._get_timestamp(),
                 "agents_used": [],
                 "bigtool_enabled": self.bigtool_manager is not None
-            }
-            
-            # Analyze query for BigTool selection
-            if self.bigtool_manager:
-                yield {
-                    "type": "bigtool_analysis", 
-                    "content": f"🧠 Analyzing query with BigTool: '{message[:50]}...'",
-                    "timestamp": self._get_timestamp()
-                }
-                
-                # Perform tool search to show what's being selected
-                for category in ["text", "image", "audio"]:
-                    if any(keyword in message.lower() for keyword in self._get_category_keywords(category)):
-                        tools_found = self.bigtool_manager.search_tools(message, category, limit=3)
-                        if tools_found:
-                            tool_names = [t['name'] for t in tools_found[:3]]
-                            yield {
-                                "type": "tool_selection",
-                                "content": f"🔧 Selected {category.upper()} tools: {', '.join(tool_names)}",
-                                "timestamp": self._get_timestamp(),
-                                "category": category,
-                                "tools": tool_names
-                            }
-            
-            # Start streaming the graph execution
-            yield {
-                "type": "status",
-                "content": "🚀 Starting supervisor agent execution...",
-                "timestamp": self._get_timestamp()
             }
             
             # Stream the graph execution
@@ -1185,6 +1399,98 @@ Be intelligent about routing - analyze what the user actually needs and leverage
             "mongodb_available": MONGODB_AVAILABLE,
             "bigtool_status": "enabled" if self.bigtool_manager else "disabled"
         }
+
+    def set_uploaded_files(self, files: List[str]) -> None:
+        """Set uploaded files for the agent."""
+        self.uploaded_files = files
+        # Also set the files for the path resolution function
+        _resolve_file_path._uploaded_files = files
+        logger.info(f"📁 Updated uploaded files: {len(files)} files")
+
+    def get_uploaded_files(self) -> list:
+        """Get the current list of uploaded files."""
+        return self.uploaded_files.copy()
+
+    def clear_uploaded_files(self):
+        """Clear the uploaded files list."""
+        self.uploaded_files = []
+        logger.info("🗑️ Cleared uploaded files list")
+
+    def _get_intelligent_tools(self, category: str, user_query: str = "") -> List:
+        """Get intelligently selected tools for a specific category using BigTool."""
+        if self.bigtool_manager and user_query:
+            # Use BigTool for intelligent selection
+            tool_matches = self.bigtool_manager.search_tools(
+                query=user_query,
+                category=category,
+                limit=5
+            )
+            
+            # Convert to tool instances
+            tools = []
+            for match in tool_matches:
+                tool_instance = self.bigtool_manager.get_tool_by_id(
+                    next(tid for tid, tinfo in self.bigtool_manager.tool_registry.items() 
+                         if tinfo["tool"] == match["tool"])
+                )
+                if tool_instance:
+                    tools.append(tool_instance)
+            
+            if tools:
+                logger.info(f"🧠 BigTool selected {len(tools)} {category} tools for query: '{user_query[:50]}...'")
+                return tools
+        
+        # Fallback to all tools in category
+        if self.bigtool_manager:
+            category_tools = self.bigtool_manager.get_tools_by_category(category)
+            tools = [tool_info["tool"] for tool_info in category_tools]
+            logger.info(f"📋 Using all {len(tools)} {category} tools (fallback)")
+            return tools
+        
+        # Final fallback to hardcoded tools
+        return self._get_fallback_tools(category)
+    
+    def _get_fallback_tools(self, category: str) -> List:
+        """Get fallback tools when BigTool is not available."""
+        if category == "text":
+            return [text_summarization, text_translation, text_analysis, advanced_text_processing, text_formatting]
+        elif category == "image":
+            return [image_recognition, image_generation, image_enhancement, image_segmentation, image_style_transfer]
+        elif category == "audio":
+            base_tools = [audio_transcription, audio_synthesis, audio_analysis, audio_enhancement, music_analysis]
+            return base_tools + get_denoise_tools()
+        else:
+            return []
+    
+    def _create_text_agent(self, user_query: str = ""):
+        """Create a text processing agent with intelligently selected tools."""
+        tools = self._get_intelligent_tools("text", user_query)
+        
+        return create_react_agent(
+            model=self.llm,
+            tools=tools,
+            name="text_expert"
+        )
+    
+    def _create_image_agent(self, user_query: str = ""):
+        """Create an image processing agent with intelligently selected tools."""
+        tools = self._get_intelligent_tools("image", user_query)
+        
+        return create_react_agent(
+            model=self.llm,
+            tools=tools,
+            name="image_expert"
+        )
+    
+    def _create_audio_agent(self, user_query: str = ""):
+        """Create an audio processing agent with intelligently selected tools."""
+        tools = self._get_intelligent_tools("audio", user_query)
+        
+        return create_react_agent(
+            model=self.llm,
+            tools=tools,
+            name="audio_expert"
+        )
 
 
 # Test section for direct execution
