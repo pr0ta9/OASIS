@@ -1,13 +1,14 @@
 """
 Core OASIS Agent - LangGraph-based intelligent multi-agent system with BigTool integration.
-Based on official LangGraph supervisor documentation with MongoDB Atlas Vector Search.
+Based on official LangGraph supervisor documentation with MongoDB Atlas Vector Search using Vertex AI.
 """
 import operator
 import uuid
+import os
 from typing import Dict, List, Any, Optional, TypedDict, Annotated, Sequence, Literal
 from langchain.chat_models import init_chat_model
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END
@@ -87,14 +88,9 @@ except ImportError:
         class FallbackSettings:
             app_mode = "fallback"
             mongo_uri = "mongodb://localhost:27017"
-            openai_api_key = None
-            google_api_key = None
-            
-            def is_openai_configured(self):
-                return self.openai_api_key is not None
             
             def is_google_configured(self):
-                return self.google_api_key is not None
+                return False  # Not needed since we only use Vertex AI
         
         settings = FallbackSettings()
 
@@ -190,9 +186,10 @@ def get_system_info() -> str:
     - Text Agent: Translation, summarization, analysis with BigTool selection
     - Image Agent: Recognition, generation, enhancement with BigTool selection
     - Audio Agent: Transcription, synthesis, analysis with BigTool selection
-    - BigTool: MongoDB Atlas Vector Search for intelligent tool discovery
+    - BigTool: MongoDB Atlas Vector Search with Vertex AI embeddings for intelligent tool discovery
     - Memory: Conversation persistence enabled
-    - Multi-modal: Complex task coordination"""
+    - Multi-modal: Complex task coordination
+    - LLM: Vertex AI Gemini-1.5-Pro (no fallback)"""
 
 @tool
 def get_file_info(file_path: str) -> str:
@@ -226,6 +223,7 @@ def get_file_info(file_path: str) -> str:
 class BigToolManager:
     """
     MongoDB Atlas Vector Search-based BigTool manager for intelligent tool selection.
+    Uses Vertex AI embeddings for semantic search.
     """
     
     def __init__(self, mongodb_uri: str, use_embeddings: bool = True):
@@ -247,18 +245,37 @@ class BigToolManager:
         self._initialize_tool_registry()
     
     def _setup_embeddings(self) -> None:
-        """Setup embeddings for MongoDB Atlas Vector Search."""
+        """Setup embeddings for MongoDB Atlas Vector Search using Vertex AI only."""
         if self.use_embeddings:
             try:
-                # Use OpenAI embeddings for MongoDB Atlas Vector Search
-                self.embeddings = OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    api_key=settings.openai_api_key
+                # Check for Google Cloud credentials
+                if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+                    raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable is required for Vertex AI")
+                
+                # Get region from settings
+                region = getattr(settings, 'google_cloud_region', 'us-central1')
+                
+                # Use Vertex AI multilingual embeddings (better compatibility)
+                self.embeddings = VertexAIEmbeddings(
+                    model_name="text-multilingual-embedding-002",  # Multilingual embedding model
+                    location=region
                 )
-                logger.info("✅ BigTool: Initialized OpenAI embeddings for vector search")
+                logger.info(f"✅ BigTool: Initialized Vertex AI embeddings (text-multilingual-embedding-002) in {region}")
             except Exception as e:
-                logger.warning(f"⚠️ BigTool: Failed to initialize embeddings: {e}")
-                self.use_embeddings = False
+                logger.warning(f"⚠️ BigTool: Failed to initialize text-multilingual-embedding-002, trying gemini-embedding-001...")
+                try:
+                    # Fallback to gemini-embedding-001
+                    region = getattr(settings, 'google_cloud_region', 'us-central1')
+                    self.embeddings = VertexAIEmbeddings(
+                        model_name="gemini-embedding-001",
+                        location=region
+                    )
+                    logger.info(f"✅ BigTool: Initialized Vertex AI embeddings (gemini-embedding-001) in {region}")
+                except Exception as e2:
+                    logger.error(f"❌ BigTool: Failed to initialize both embedding models: {e2}")
+                    raise ValueError(f"Failed to initialize Vertex AI embeddings. Tried text-multilingual-embedding-002 and gemini-embedding-001: {e2}")
+        else:
+            logger.info("ℹ️ BigTool: Embeddings disabled")
     
     def _setup_mongodb(self) -> None:
         """Setup MongoDB Atlas Vector Search."""
@@ -584,35 +601,72 @@ class OASISAgent:
         self._build_supervisor_system()
     
     def _setup_llm(self) -> None:
-        """Initialize the LLM with OpenAI as primary, Gemini as fallback."""
+        """Initialize the LLM with Vertex AI Gemini only."""
         try:
-            # Try OpenAI first
-            if settings.is_openai_configured():
-                self.llm = ChatOpenAI(model="gpt-4o-mini", api_key=settings.openai_api_key)
-                logger.info("✅ Initialized OpenAI GPT-4o-mini model")
-                return
-            else:
-                logger.warning("⚠️ OpenAI API key not configured, trying Gemini fallback")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to initialize OpenAI model: {e}")
-        
-        # Fallback to Google Gemini
-        try:
-            if not settings.is_google_configured():
-                logger.error("Neither OpenAI nor Google API key configured")
-                raise ValueError("Either OPENAI_API_KEY or GOOGLE_API_KEY is required.")
+            # Check for Google Cloud credentials
+            if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+                raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable is required for Vertex AI")
             
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-pro",
-                google_api_key=settings.google_api_key,
+            # Get region from settings
+            region = getattr(settings, 'google_cloud_region', 'us-central1')
+            
+            # Use Vertex AI Gemini 2.0 Flash (latest model)
+            self.llm = ChatVertexAI(
+                model_name="gemini-2.0-flash-001",  # Latest Gemini 2.0 Flash model
                 temperature=0.1,
-                convert_system_message_to_human=True
+                max_tokens=8192,
+                location=region
             )
-            logger.info("✅ Initialized Google Gemini model as fallback")
+            logger.info(f"✅ Initialized Vertex AI Gemini-2.0-Flash-001 in {region}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to initialize any LLM: {e}")
-            raise ValueError("Failed to initialize both OpenAI and Google models.")
+            logger.warning(f"⚠️ Failed to initialize gemini-2.0-flash-001, trying fallback...")
+            try:
+                # Fallback to Gemini 1.5 Pro
+                region = getattr(settings, 'google_cloud_region', 'us-central1')
+                self.llm = ChatVertexAI(
+                    model_name="gemini-1.5-pro-001",  # Stable 1.5 Pro version
+                    temperature=0.1,
+                    max_tokens=8192,
+                    location=region
+                )
+                logger.info(f"✅ Initialized Vertex AI Gemini-1.5-Pro-001 in {region}")
+            except Exception as e2:
+                logger.warning(f"⚠️ Failed with gemini-1.5-pro-001, trying gemini-1.5-pro...")
+                try:
+                    # Try standard gemini-1.5-pro
+                    self.llm = ChatVertexAI(
+                        model_name="gemini-1.5-pro",
+                        temperature=0.1,
+                        max_tokens=8192,
+                        location=region
+                    )
+                    logger.info(f"✅ Initialized Vertex AI Gemini-1.5-Pro in {region}")
+                except Exception as e3:
+                    logger.warning(f"⚠️ Failed with gemini-1.5-pro, trying gemini-pro...")
+                    try:
+                        # Try standard gemini-pro
+                        self.llm = ChatVertexAI(
+                            model_name="gemini-pro",
+                            temperature=0.1,
+                            max_tokens=8192,
+                            location=region
+                        )
+                        logger.info(f"✅ Initialized Vertex AI Gemini-Pro in {region}")
+                    except Exception as e4:
+                        logger.warning(f"⚠️ Failed in {region}, trying us-east1...")
+                        try:
+                            # Try different region with basic model
+                            self.llm = ChatVertexAI(
+                                model_name="gemini-pro",
+                                temperature=0.1,
+                                max_tokens=8192,
+                                location="us-east1"
+                            )
+                            logger.info("✅ Initialized Vertex AI Gemini-Pro in us-east1")
+                        except Exception as e5:
+                            logger.error(f"❌ Failed to initialize Vertex AI model: {e5}")
+                            raise ValueError(f"Failed to initialize Vertex AI Gemini model: {e5}")
     
     def _setup_memory(self) -> None:
         """Setup conversation memory using MemorySaver or MongoDB."""
@@ -639,7 +693,7 @@ class OASISAgent:
             try:
                 self.bigtool_manager = BigToolManager(
                     mongodb_uri=self.mongodb_uri,
-                    use_embeddings=settings.is_openai_configured()
+                    use_embeddings=bool(os.getenv('GOOGLE_APPLICATION_CREDENTIALS'))
                 )
                 logger.info("✅ BigTool manager initialized with MongoDB Atlas Vector Search")
             except Exception as e:
@@ -1107,8 +1161,8 @@ Be intelligent about routing - analyze what the user actually needs and leverage
             total_tools = len(self.bigtool_manager.tool_registry)
         
         return {
-            "system_type": "OASIS Official Supervisor Multi-Agent System with BigTool",
-            "architecture": "Official LangGraph Supervisor Pattern + MongoDB Atlas Vector Search",
+            "system_type": "OASIS Official Supervisor Multi-Agent System with BigTool and Vertex AI",
+            "architecture": "Official LangGraph Supervisor Pattern + MongoDB Atlas Vector Search + Vertex AI Embeddings",
             "agents": {
                 "supervisor": "Official LangGraph supervisor with handoff coordination",
                 "text_expert": "Translation, summarization, sentiment analysis with intelligent tool selection",
@@ -1125,7 +1179,7 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                 "intelligent_tool_selection": self.bigtool_manager is not None,
                 "vector_search": self.bigtool_manager is not None
             },
-            "llm_backend": "OpenAI GPT-4o-mini" if settings.is_openai_configured() else "Google Gemini",
+            "llm_backend": "Vertex AI Gemini-1.5-Pro",
             "total_tools": total_tools,
             "supervisor_available": SUPERVISOR_AVAILABLE,
             "mongodb_available": MONGODB_AVAILABLE,
@@ -1138,7 +1192,7 @@ if __name__ == "__main__":
     """
     Test the OASIS supervisor multi-agent system with BigTool integration when run directly.
     """
-    print("🚀 Initializing OASIS Official Supervisor Multi-Agent System with BigTool...")
+    print("🚀 Initializing OASIS Official Supervisor Multi-Agent System with BigTool and Vertex AI...")
     
     try:
         # Check if supervisor is available
@@ -1173,9 +1227,10 @@ if __name__ == "__main__":
         print(f"🧠 BigTool Enabled: {result.get('bigtool_enabled', False)}")
         
         # Interactive testing mode
-        print("\n🎮 Interactive OASIS BigTool Testing Mode")
+        print("\n🎮 Interactive OASIS BigTool Testing Mode with Vertex AI")
         print("=" * 80)
-        print("Enter your messages to test the supervisor multi-agent system with BigTool!")
+        print("Enter your messages to test the supervisor multi-agent system with BigTool and Vertex AI!")
+        print("Note: System uses Vertex AI Gemini-1.5-Pro only (no fallback)")
         print("Try examples like:")
         print("  - 'Translate Hello World to Spanish and analyze sentiment'")
         print("  - 'Generate an image of a sunset and describe it'") 

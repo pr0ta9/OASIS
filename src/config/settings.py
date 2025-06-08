@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Google AI Configuration
     google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
     google_project_id: Optional[str] = Field(default=None, env="GOOGLE_PROJECT_ID")
+    google_application_credentials: Optional[str] = Field(default=None, env="GOOGLE_APPLICATION_CREDENTIALS")
+    google_cloud_region: str = Field(default="us-central1", env="GOOGLE_CLOUD_REGION")
     
     # OpenAI Configuration
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
@@ -44,7 +46,7 @@ class Settings(BaseSettings):
 
     def is_google_configured(self) -> bool:
         """Check if Google AI is properly configured."""
-        return bool(self.google_api_key)
+        return bool(self.google_api_key or self.google_application_credentials)
     
     def is_openai_configured(self) -> bool:
         """Check if OpenAI is properly configured."""
