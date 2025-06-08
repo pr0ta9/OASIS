@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     google_api_key: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
     google_project_id: Optional[str] = Field(default=None, env="GOOGLE_PROJECT_ID")
     
+    # OpenAI Configuration
+    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    openai_organization: Optional[str] = Field(default=None, env="OPENAI_ORGANIZATION")
+    
+    # MongoDB Configuration
+    mongo_uri: str = Field(default="mongodb://localhost:27017", env="MONGO_URI")
+    
     # Application Configuration
     app_mode: str = Field(default="simple", env="APP_MODE")  # simple or developer
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -38,6 +45,10 @@ class Settings(BaseSettings):
     def is_google_configured(self) -> bool:
         """Check if Google AI is properly configured."""
         return bool(self.google_api_key)
+    
+    def is_openai_configured(self) -> bool:
+        """Check if OpenAI is properly configured."""
+        return bool(self.openai_api_key)
     
     def get_window_dimensions(self) -> tuple[int, int]:
         """Parse window size string into width and height."""
