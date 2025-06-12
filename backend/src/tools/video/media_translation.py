@@ -1,9 +1,17 @@
-from google.cloud import mediatranslation as media
 from langchain_core.tools import tool
 from typing import Optional, List, Dict, Any
 import os
 import logging
 from pathlib import Path
+
+# Optional import with fallback for media translation
+try:
+    from google.cloud import mediatranslation as media
+    MEDIATRANSLATION_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Media Translation not available: {e}")
+    MEDIATRANSLATION_AVAILABLE = False
+    media = None
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +25,9 @@ def init_media_translation_client():
     Raises:
         Exception: If client initialization fails
     """
+    if not MEDIATRANSLATION_AVAILABLE:
+        raise Exception("Media Translation API is not available. The google-cloud-mediatranslation package is not installed.")
+    
     try:
         # Check for credentials
         if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
@@ -51,6 +62,9 @@ def media_translation_tool(
     Returns:
         Translation results and output file information
     """
+    if not MEDIATRANSLATION_AVAILABLE:
+        return "❌ Error: Media Translation API is not available. The google-cloud-mediatranslation package is not installed or available."
+    
     try:
         logger.info("🔄 Initializing Google Cloud Media Translation client...")
         client = init_media_translation_client()

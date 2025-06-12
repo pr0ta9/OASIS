@@ -1,8 +1,16 @@
-from modelscope.pipelines import pipeline
-from modelscope.utils.constant import Tasks
 from langchain_core.tools import tool
 from typing import Optional
 
+# Optional imports with fallback
+try:
+    from modelscope.pipelines import pipeline
+    from modelscope.utils.constant import Tasks
+    MODELSCOPE_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ ModelScope not available: {e}")
+    MODELSCOPE_AVAILABLE = False
+    pipeline = None
+    Tasks = None
 
 
 def init_denoise():
@@ -18,6 +26,9 @@ def init_denoise():
     Raises:
         Exception: If model initialization fails
     """
+    if not MODELSCOPE_AVAILABLE:
+        raise Exception("ModelScope is not available. Please install modelscope and resolve dependency conflicts.")
+    
     # ModelScope speech enhancement model path
     model_path = 'damo/speech_zipenhancer_ans_multiloss_16k_base'
     # Alternative model: 'damo/speech_frcrn_ans_cirm_16k'
@@ -49,6 +60,10 @@ def audio_denoise_tool(
     Returns:
         Status message indicating success or failure of the denoising process
     """
+    if not MODELSCOPE_AVAILABLE:
+        return "❌ Error: ModelScope audio denoising is not available due to dependency conflicts. " \
+               "Please resolve the ModelScope/datasets library compatibility issue."
+    
     # Initialize model 
     try:
         print("🔄 Initializing denoise model...")

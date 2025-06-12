@@ -7,6 +7,7 @@ Use --cli-test for backend testing only, --help for more options.
 
 import sys
 import argparse
+import os
 from pathlib import Path
 
 # Add backend and frontend src directories to Python path
@@ -15,10 +16,28 @@ frontend_src_path = Path(__file__).parent / "frontend" / "src"
 sys.path.insert(0, str(backend_src_path))
 sys.path.insert(0, str(frontend_src_path))
 
+def setup_google_cloud_credentials():
+    """Set up Google Cloud credentials automatically."""
+    if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+        # Look for the credentials file in the project root
+        project_root = Path(__file__).parent
+        creds_file = project_root / "oasis-462300-83ff07e506dc.json"
+        
+        if creds_file.exists():
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = str(creds_file)
+            print(f"✅ Google Cloud credentials set: {creds_file.name}")
+        else:
+            print("⚠️ Google Cloud credentials file not found. Some features may be limited.")
+            print(f"Expected location: {creds_file}")
+    else:
+        print(f"✅ Google Cloud credentials already set")
 
 def run_cli_test():
     """Run the backend in CLI mode for testing purposes."""
     print("🧪 Running OASIS CLI Test Mode...")
+    
+    # Set up Google Cloud credentials
+    setup_google_cloud_credentials()
     
     try:
         from core.agent import OASISAgent
@@ -68,6 +87,9 @@ def run_oasis_application():
     print("🚀 Starting OASIS Application...")
     print("🔧 Backend: Integrated agent system")
     print("🖥️  Frontend: Interactive GUI")
+    
+    # Set up Google Cloud credentials
+    setup_google_cloud_credentials()
     
     try:
         from gui.main_window import OASISMainWindow

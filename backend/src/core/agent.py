@@ -11,11 +11,20 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.memory import InMemoryStore
+from langgraph.types import Command, Send
 from loguru import logger
+
+# Define MessagesState for custom supervisor pattern
+class MessagesState(TypedDict):
+    """State for the multi-agent supervisor system."""
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    uploaded_files: List[str]
+    current_phase: str  # "planning", "execution", "result_gathering"
+    execution_plan: Dict[str, Any]  # Stores the execution plan and state
 
 # Import the official supervisor
 try:
@@ -677,10 +686,31 @@ class BigToolManager:
             advanced_text_processing, text_formatting, document_analysis
         ] + get_text_tools()
         
+        # Include real Vision OCR tools from document module
+        vision_tools = []
+        try:
+            from backend.src.tools.document import (
+                vision_text_detection_tool,
+                vision_document_analysis_tool,
+                vision_image_analysis_tool
+            )
+            vision_tools = [
+                vision_text_detection_tool,
+                vision_document_analysis_tool,
+                vision_image_analysis_tool
+            ]
+            
+            # Ensure Vision tools have access to current files
+            from backend.src.tools.document import set_current_uploaded_files
+            set_current_uploaded_files(globals().get('_current_uploaded_files', []))
+            logger.info("✅ Added Google Cloud Vision tools to image category")
+        except ImportError:
+            logger.warning("⚠️ Could not import Vision tools for image category")
+        
         image_tools = [
             image_recognition, image_generation, image_enhancement,
-            image_segmentation, image_style_transfer, ocr_text_extraction
-        ]
+            image_segmentation, image_style_transfer
+        ] + vision_tools  # Add real Vision tools instead of sample OCR
         
         # Get audio tools including imported denoise tools
         audio_tools = [
@@ -1325,129 +1355,353 @@ class OASISAgent:
             self.bigtool_manager = None
     
     def _build_supervisor_system(self) -> None:
-        """Build the complete supervisor system using official LangGraph supervisor."""
-        
-        if not SUPERVISOR_AVAILABLE:
-            logger.error("❌ SUPERVISOR: langgraph_supervisor not available. Please install: pip install langgraph-supervisor")
-            raise ImportError("langgraph_supervisor is required for the supervisor pattern")
+        """Build custom supervisor system with multi-step process: Planning -> Execution -> Result Gathering."""
         
         try:
-            logger.info("🎯 SUPERVISOR: Starting multi-agent system construction")
+            logger.info("🎯 SUPERVISOR: Starting custom multi-agent system construction")
             
-            # Create individual specialist agents with basic tools for now
-            # (They will be recreated with intelligent tools during actual queries)
+            # Create individual specialist agents with minimal prompts
             logger.info("🤖 AGENT CREATION: Building text_expert agent")
             text_agent = create_react_agent(
                 model=self.llm,
-                tools=self._get_fallback_tools("text"),
-                name="text_expert"
+                tools=self._get_intelligent_tools("text") if self.bigtool_manager else self._get_fallback_tools("text"),
+                name="text_expert",
+                prompt="You are a text processing expert. Follow the specific task instructions provided to you."
             )
             
             logger.info("🖼️ AGENT CREATION: Building image_expert agent")
             image_agent = create_react_agent(
                 model=self.llm,
-                tools=self._get_fallback_tools("image"),
-                name="image_expert"
+                tools=self._get_intelligent_tools("image") if self.bigtool_manager else self._get_fallback_tools("image"),
+                name="image_expert", 
+                prompt="You are an image analysis expert. Follow the specific task instructions provided to you."
             )
             
             logger.info("🎵 AGENT CREATION: Building audio_expert agent")
             audio_agent = create_react_agent(
                 model=self.llm,
-                tools=self._get_fallback_tools("audio"),
-                name="audio_expert"
+                tools=self._get_intelligent_tools("audio") if self.bigtool_manager else self._get_fallback_tools("audio"),
+                name="audio_expert",
+                prompt="You are an audio processing expert. Follow the specific task instructions provided to you."
             )
             
             logger.info("📄 AGENT CREATION: Building document_expert agent")
             document_agent = create_react_agent(
                 model=self.llm,
-                tools=self._get_fallback_tools("document"),
-                name="document_expert"
+                tools=self._get_intelligent_tools("document") if self.bigtool_manager else self._get_fallback_tools("document"),
+                name="document_expert",
+                prompt="You are a document processing expert. Follow the specific task instructions provided to you."
             )
             
             logger.info("🎬 AGENT CREATION: Building video_expert agent")
             video_agent = create_react_agent(
                 model=self.llm,
-                tools=self._get_fallback_tools("video"),
-                name="video_expert"
+                tools=self._get_intelligent_tools("video") if self.bigtool_manager else self._get_fallback_tools("video"),
+                name="video_expert",
+                prompt="You are a video processing expert. Follow the specific task instructions provided to you."
             )
             
-            logger.info("🛠️ SUPERVISOR TOOLS: Adding system tools")
-            # Create supervisor with system tools
-            supervisor_tools = [get_system_info, get_file_info, request_file_upload, debug_file_access]
-            logger.info(f"🛠️ System Tools: {len(supervisor_tools)} tools available")
+            logger.info("🛠️ SUPERVISOR: Creating custom supervisor with multi-step planning")
             
-            # Enhanced prompt for OASIS supervisor with BigTool and new agents
-            logger.info("📝 SUPERVISOR PROMPT: Configuring intelligent routing system")
-            supervisor_prompt = """You are the OASIS Supervisor Agent managing specialized processing agents with BigTool integration:
+            # Create custom supervisor node function with enhanced multi-phase process
+            def supervisor_node(state: MessagesState) -> Command[Literal["text_expert", "image_expert", "audio_expert", "document_expert", "video_expert", "supervisor", "__end__"]]:
+                """Enhanced supervisor with explicit multi-phase process: Planning -> Execution -> Result Gathering."""
+                
+                # Get the latest user message and check current phase
+                messages = state["messages"]
+                latest_message = messages[-1] if messages else None
+                
+                if not latest_message:
+                    return Command(goto="__end__")
+                
+                # Check if this is a continuation or initial request
+                current_phase = state.get("current_phase", "planning")
+                execution_plan = state.get("execution_plan", {})
+                
+                # Get uploaded files info
+                uploaded_files = state.get("uploaded_files", [])
+                file_info = ""
+                if uploaded_files:
+                    file_list = []
+                    for file_path in uploaded_files:
+                        filename = os.path.basename(file_path)
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+                            file_type = 'image'
+                        elif ext in ['.mp4', '.avi', '.mov', '.mkv', '.wmv']:
+                            file_type = 'video'
+                        elif ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg']:
+                            file_type = 'audio'
+                        elif ext in ['.pdf', '.doc', '.docx', '.txt']:
+                            file_type = 'document'
+                        else:
+                            file_type = 'file'
+                        file_list.append(f"- {filename} ({file_type})")
+                    file_info = f"\n\nUploaded files available:\n" + "\n".join(file_list)
+                
+                user_request = latest_message.content if hasattr(latest_message, 'content') else str(latest_message)
+                
+                # ================== PHASE 1: DETAILED PLANNING ==================
+                if current_phase == "planning":
+                    
+                    planning_message = f"""
+🧠 **OASIS SUPERVISOR - PHASE 1: COMPREHENSIVE PLANNING**
 
-**Available Agents:**
-- text_expert: Text processing, translation, summarization, analysis, speech-to-text, text-to-speech (enhanced with BigTool selection)
-- image_expert: Image recognition, generation, editing, enhancement (enhanced with BigTool selection)
-- audio_expert: Audio transcription, synthesis, analysis, denoising (enhanced with BigTool selection)
-- document_expert: Document processing, OCR, PDF analysis, form processing using Document AI and Vision API (enhanced with BigTool selection)
-- video_expert: Video analysis, scene detection, text extraction, media translation using Video Intelligence API (enhanced with BigTool selection)
+**📋 Request Analysis:**
+- **User Request:** "{user_request}"
+- **Available Files:** {len(uploaded_files)} file(s){file_info}
+- **Context:** Analyzing requirements and determining optimal execution strategy
 
-**BigTool Integration:**
-- Each agent has access to intelligently selected tools based on user queries
-- Tools are discovered using MongoDB Atlas Vector Search for optimal task matching
-- Semantic tool selection improves task execution accuracy
+**🔍 Intelligence Analysis:**"""
+                    
+                    # Advanced request analysis for multi-step workflows
+                    agents_needed = []
+                    tools_needed = []
+                    execution_steps = []
+                    
+                    # Complex request analysis - check for multi-modal workflows
+                    has_image = any(os.path.splitext(f)[1].lower() in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'] for f in uploaded_files)
+                    needs_ocr = any(keyword in user_request.lower() for keyword in ["text", "ocr", "read", "extract", "convert"])
+                    needs_audio = any(keyword in user_request.lower() for keyword in ["audio", "sound", "speech", "voice", "tts"])
+                    needs_analysis = any(keyword in user_request.lower() for keyword in ["analyze", "describe", "what", "identify"])
+                    
+                    # Multi-step workflow detection
+                    if has_image and needs_ocr and needs_audio:
+                        # Complex workflow: Image → Text → Audio
+                        agents_needed = ["image_expert", "audio_expert"]
+                        tools_needed = ["ocr_text_extraction", "audio_synthesis"]
+                        execution_steps = [
+                            "1. 🖼️ IMAGE EXPERT: Extract text from image using OCR",
+                            "2. 🎵 AUDIO EXPERT: Convert extracted text to speech audio",
+                            "3. 📤 RESULT: Provide final audio output"
+                        ]
+                        
+                    elif has_image and needs_ocr:
+                        # Image processing workflow
+                        agents_needed = ["image_expert"]
+                        tools_needed = ["ocr_text_extraction", "vision_document_analysis_tool"]
+                        execution_steps = [
+                            "1. 🖼️ IMAGE EXPERT: Extract and analyze text from image",
+                            "2. 📤 RESULT: Provide extracted text in requested format"
+                        ]
+                        
+                    elif has_image and needs_analysis:
+                        # Image analysis workflow
+                        agents_needed = ["image_expert"]
+                        tools_needed = ["vision_image_analysis_tool", "vision_text_detection_tool"]
+                        execution_steps = [
+                            "1. 🖼️ IMAGE EXPERT: Analyze image content and extract text",
+                            "2. 📤 RESULT: Provide comprehensive image analysis"
+                        ]
+                        
+                    elif needs_audio:
+                        # Audio processing workflow
+                        agents_needed = ["audio_expert"]
+                        tools_needed = ["audio_transcription", "audio_synthesis", "audio_analysis"]
+                        execution_steps = [
+                            "1. 🎵 AUDIO EXPERT: Process audio content",
+                            "2. 📤 RESULT: Provide audio analysis/output"
+                        ]
+                        
+                    else:
+                        # Default text processing
+                        agents_needed = ["text_expert"]
+                        tools_needed = ["text_analysis", "text_summarization"]
+                        execution_steps = [
+                            "1. 📝 TEXT EXPERT: Process and analyze text content",
+                            "2. 📤 RESULT: Provide processed text output"
+                        ]
+                    
+                    planning_message += f"""
+✅ **AGENTS IDENTIFIED:** {', '.join([agent.upper().replace('_EXPERT', '') for agent in agents_needed])}
+🛠️ **TOOLS SELECTED:** {', '.join(tools_needed)}
+🎯 **EXECUTION STRATEGY:** {'Multi-Agent Workflow' if len(agents_needed) > 1 else 'Single-Agent Processing'}
 
-**Your Role:**
-1. **Attempt to process user requests directly** - don't preemptively assume files are needed
-2. **Route to appropriate agents** for task execution using handoff tools
-3. **Handle file requirements intelligently**:
-   - If an agent reports a file is missing during processing, use the request_file_upload tool
-   - Only request files when actually needed, not based on assumptions
-   - Let agents try to work with available information first
-4. **For multi-modal tasks**, coordinate multiple agents sequentially
-5. **Synthesize results** and provide comprehensive final responses
+**📋 DETAILED EXECUTION PLAN:**
+{chr(10).join(execution_steps)}
 
-**File Handling Guidelines:**
-- If user mentions files (images, audio, documents, videos) but hasn't uploaded any, try to help with general information first
-- Only use request_file_upload when an agent specifically needs a file to complete a task
-- When files are uploaded, ensure agents can access them via the file path resolution system
-- Be helpful and educational even when specific files aren't available
+**⚙️ WORKFLOW COMPLEXITY:** {'High - Multi-step cross-agent coordination required' if len(agents_needed) > 1 else 'Standard - Single agent processing'}
 
-**Guidelines:**
-- Use handoff tools to delegate to specialist agents
-- For complex tasks, you can hand off to multiple agents in sequence  
-- Always provide a comprehensive final response to the user
-- Think step-by-step about agent routing decisions
-- Leverage BigTool's intelligent tool selection for optimal results
-- Be proactive in helping users accomplish their goals
-- For document processing tasks, route to document_expert
-- For video processing tasks, route to video_expert
+---
+🔄 **PROCEEDING TO EXECUTION PHASE...**
+"""
+                    
+                    # Store execution plan in state
+                    new_execution_plan = {
+                        "agents_needed": agents_needed,
+                        "tools_needed": tools_needed,
+                        "execution_steps": execution_steps,
+                        "current_step": 0,
+                        "step_results": []
+                    }
+                    
+                    return Command(
+                        goto="supervisor",
+                        update={
+                            "messages": [AIMessage(content=planning_message)],
+                            "current_phase": "execution",
+                            "execution_plan": new_execution_plan
+                        }
+                    )
+                
+                # ================== PHASE 2: STEP-BY-STEP EXECUTION ==================
+                elif current_phase == "execution":
+                    
+                    current_step = execution_plan.get("current_step", 0)
+                    agents_needed = execution_plan.get("agents_needed", [])
+                    tools_needed = execution_plan.get("tools_needed", [])
+                    execution_steps = execution_plan.get("execution_steps", [])
+                    
+                    if current_step < len(agents_needed):
+                        current_agent = agents_needed[current_step]
+                        
+                        execution_message = f"""
+⚡ **OASIS SUPERVISOR - PHASE 2: EXECUTION (Step {current_step + 1}/{len(agents_needed)})**
 
-Be intelligent about routing - analyze what the user actually needs and leverage the enhanced tool selection capabilities."""
+**🚀 CURRENT OPERATION:**
+{execution_steps[current_step] if current_step < len(execution_steps) else f"Processing with {current_agent.upper()}"}
+
+**📤 STATUS:** Dispatching task to {current_agent.upper().replace('_EXPERT', '')} Agent...
+**🔧 AGENT:** {current_agent.replace('_expert', '').title()} Specialist
+**⚙️ TOOLS:** {', '.join([tool for tool in tools_needed if any(keyword in tool.lower() for keyword in current_agent.split('_'))])}
+
+---
+"""
+                        
+                        # Create specific task instruction
+                        if current_agent == "image_expert":
+                            if "audio" in user_request.lower() and "convert" in user_request.lower():
+                                task_instruction = f"""
+**CRITICAL TASK - IMAGE EXPERT:**
+You are part of a multi-step workflow to convert image text to audio.
+
+**YOUR SPECIFIC ROLE:** Extract ALL text from the uploaded image
+**USER REQUEST:** {user_request}
+**AVAILABLE FILES:** {uploaded_files}
+
+**INSTRUCTIONS:**
+1. Use OCR to extract ALL visible text from the image
+2. Preserve formatting, line breaks, and conversation structure
+3. Return the complete extracted text - this will be passed to audio synthesis
+4. Be thorough - missing text means incomplete audio output
+
+**CRITICAL:** The next agent (audio_expert) depends on your text extraction for audio synthesis.
+"""
+                            else:
+                                task_instruction = f"""
+**TASK - IMAGE EXPERT:**
+**USER REQUEST:** {user_request}
+**AVAILABLE FILES:** {uploaded_files}
+**EXECUTE:** {execution_steps[current_step] if current_step < len(execution_steps) else 'Process image content'}
+"""
+                        else:
+                            task_instruction = f"""
+**TASK - {current_agent.upper()}:**
+**USER REQUEST:** {user_request}  
+**AVAILABLE FILES:** {uploaded_files}
+**EXECUTE:** {execution_steps[current_step] if current_step < len(execution_steps) else f'Process with {current_agent}'}
+"""
+                        
+                        # Update execution plan for next step
+                        updated_plan = execution_plan.copy()
+                        updated_plan["current_step"] = current_step + 1
+                        
+                        # Ensure uploaded files are available globally before agent execution
+                        if uploaded_files:
+                            try:
+                                from backend.src.tools.document import set_current_uploaded_files
+                                set_current_uploaded_files(uploaded_files)
+                                logger.info(f"📁 Set uploaded files for {current_agent}: {len(uploaded_files)} files")
+                            except ImportError:
+                                logger.warning(f"⚠️ Could not set uploaded files for {current_agent}")
+                        
+                        return Command(
+                            goto=current_agent,
+                            update={
+                                "messages": [AIMessage(content=execution_message)],
+                                "current_phase": "execution",
+                                "execution_plan": updated_plan
+                            },
+                            graph=Send(current_agent, {
+                                "messages": [HumanMessage(content=task_instruction)] + messages,
+                                "uploaded_files": uploaded_files
+                            })
+                        )
+                    else:
+                        # All agents completed, move to result gathering
+                        return Command(
+                            goto="supervisor",
+                            update={
+                                "current_phase": "result_gathering",
+                                "execution_plan": execution_plan
+                            }
+                        )
+                
+                # ================== PHASE 3: RESULT GATHERING ==================
+                elif current_phase == "result_gathering":
+                    
+                    result_message = f"""
+📊 **OASIS SUPERVISOR - PHASE 3: RESULT COMPILATION**
+
+**✅ EXECUTION COMPLETED**
+**📈 AGENTS DEPLOYED:** {len(execution_plan.get("agents_needed", []))} specialist agents
+**🔧 OPERATIONS PERFORMED:** {len(execution_plan.get("execution_steps", []))} steps
+**🎯 WORKFLOW STATUS:** All phases completed successfully
+
+**📋 PROCESSING SUMMARY:**
+{chr(10).join(f"✅ {step}" for step in execution_plan.get("execution_steps", []))}
+
+---
+🎉 **FINAL RESULTS READY**
+"""
+                    
+                    return Command(
+                        goto="__end__",
+                        update={"messages": [AIMessage(content=result_message)]}
+                    )
+                
+                # Default fallback
+                return Command(goto="__end__")
             
-            logger.info("🔗 WORKFLOW: Creating supervisor workflow with 5 agents")
-            # Create the supervisor workflow using official LangGraph supervisor
-            workflow = create_supervisor(
-                agents=[text_agent, image_agent, audio_agent, document_agent, video_agent],
-                model=self.llm,
-                tools=supervisor_tools,
-                prompt=supervisor_prompt
-            )
+            logger.info("🔗 WORKFLOW: Creating custom StateGraph workflow")
+            # Create the StateGraph workflow
+            workflow = StateGraph(MessagesState)
             
-            logger.info("⚙️ COMPILATION: Compiling supervisor system")
+            # Add nodes
+            workflow.add_node("supervisor", supervisor_node)
+            workflow.add_node("text_expert", text_agent)
+            workflow.add_node("image_expert", image_agent)
+            workflow.add_node("audio_expert", audio_agent)
+            workflow.add_node("document_expert", document_agent)
+            workflow.add_node("video_expert", video_agent)
+            
+            # Add edges
+            workflow.add_edge(START, "supervisor")
+            workflow.add_edge("text_expert", END)
+            workflow.add_edge("image_expert", END)
+            workflow.add_edge("audio_expert", END)
+            workflow.add_edge("document_expert", END)
+            workflow.add_edge("video_expert", END)
+            
+            logger.info("⚙️ COMPILATION: Compiling custom supervisor system")
             # Compile with checkpointer if available
             if self.checkpointer:
                 self.app = workflow.compile(checkpointer=self.checkpointer)
-                logger.info("✅ SUPERVISOR: Compiled with memory persistence and BigTool integration")
+                logger.info("✅ SUPERVISOR: Custom multi-step supervisor compiled with memory persistence")
             else:
                 self.app = workflow.compile()
-                logger.info("✅ SUPERVISOR: Compiled with BigTool integration (no persistence)")
+                logger.info("✅ SUPERVISOR: Custom multi-step supervisor compiled")
             
             logger.info("📊 VISUALIZATION: Generating system graph")
             # Save visualization
             try:
-                with open("oasis_bigtool_supervisor.png", "wb") as f:
+                with open("oasis_custom_supervisor.png", "wb") as f:
                     f.write(self.app.get_graph().draw_mermaid_png())
-                logger.info("📊 Graph visualization saved as oasis_bigtool_supervisor.png")
+                logger.info("📊 Graph visualization saved as oasis_custom_supervisor.png")
             except Exception as e:
                 logger.warning(f"⚠️ Could not save graph visualization: {e}")
             
-            logger.info("🎉 SUPERVISOR SYSTEM: Complete and ready for operation")
+            logger.info("🎉 CUSTOM SUPERVISOR SYSTEM: Complete and ready for multi-step operation")
                 
         except Exception as e:
             logger.error(f"❌ SUPERVISOR BUILD FAILED: {e}")
@@ -1908,6 +2162,14 @@ Be intelligent about routing - analyze what the user actually needs and leverage
         
         # Force update the global file list for all tools
         globals()['_current_uploaded_files'] = valid_files
+        
+        # Update Vision tools' uploaded files list
+        try:
+            from backend.src.tools.document import set_current_uploaded_files
+            set_current_uploaded_files(valid_files)
+            logger.info("📸 Updated Vision tools with current files")
+        except ImportError:
+            logger.warning("⚠️ Could not update Vision tools with current files")
 
     def get_uploaded_files(self) -> list:
         """Get the current list of uploaded files."""
@@ -1960,10 +2222,26 @@ Be intelligent about routing - analyze what the user actually needs and leverage
                 advanced_text_processing, text_formatting, document_analysis
             ] + get_text_tools()
         elif category == "image":
+            # Try to include real Vision tools if available
+            vision_tools = []
+            try:
+                from backend.src.tools.document import (
+                    vision_text_detection_tool,
+                    vision_document_analysis_tool,
+                    vision_image_analysis_tool
+                )
+                vision_tools = [
+                    vision_text_detection_tool,
+                    vision_document_analysis_tool,
+                    vision_image_analysis_tool
+                ]
+            except ImportError:
+                pass
+            
             return [
                 image_recognition, image_generation, image_enhancement,
-                image_segmentation, image_style_transfer, ocr_text_extraction
-            ]
+                image_segmentation, image_style_transfer
+            ] + vision_tools  # Use real Vision tools, not sample OCR
         elif category == "audio":
             return [
                 audio_transcription, audio_synthesis, audio_analysis,

@@ -37,9 +37,12 @@ except ImportError as e:
 
 try:
     from .vision_ocr import (
+        vision_diagnostic_tool,
+        vision_image_analysis_tool,
         vision_text_detection_tool,
         vision_document_analysis_tool,
-        init_vision_client
+        init_vision_client,
+        set_current_uploaded_files
     )
     VISION_AVAILABLE = True
 except ImportError as e:
@@ -47,6 +50,16 @@ except ImportError as e:
     VISION_AVAILABLE = False
     # Create placeholder tools
     from langchain_core.tools import tool
+    
+    @tool
+    def vision_diagnostic_tool() -> str:
+        """Placeholder Vision diagnostic tool - Cloud Vision API not available."""
+        return f"❌ Google Cloud Vision API not available. Install: pip install google-cloud-vision"
+        
+    @tool
+    def vision_image_analysis_tool(image_path: str) -> str:
+        """Placeholder Vision image analysis tool - Cloud Vision API not available."""
+        return f"❌ Google Cloud Vision API not available. Install: pip install google-cloud-vision"
     
     @tool
     def vision_text_detection_tool(image_path: str) -> str:
@@ -61,24 +74,33 @@ except ImportError as e:
     def init_vision_client():
         """Placeholder function."""
         raise ImportError("Vision client not available")
+    
+    def set_current_uploaded_files(files):
+        """Placeholder function."""
+        pass
 
 def get_document_tools():
     """Get all available document processing tools as a list."""
     return [
         document_ai_processor_tool,
         document_ocr_tool,
+        vision_diagnostic_tool,
+        vision_image_analysis_tool,
         vision_text_detection_tool,
         vision_document_analysis_tool
     ]
 
 __all__ = [
     "document_ai_processor_tool",
-    "document_ocr_tool", 
+    "document_ocr_tool",
+    "vision_diagnostic_tool",
+    "vision_image_analysis_tool",
     "vision_text_detection_tool",
     "vision_document_analysis_tool",
     "get_document_tools",
     "init_document_ai_client",
-    "init_vision_client"
+    "init_vision_client",
+    "set_current_uploaded_files"
 ]
 
 # Package metadata  
