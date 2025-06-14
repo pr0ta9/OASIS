@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OASIS Run Script
-Runs the OASIS application using the virtual environment.
+Runs the OASIS multi-agent system using the virtual environment.
 """
 import sys
 import subprocess
@@ -17,11 +17,17 @@ def get_venv_python():
 
 def main():
     """Run OASIS using the virtual environment."""
-    parser = argparse.ArgumentParser(description="Run OASIS with virtual environment")
+    parser = argparse.ArgumentParser(description="Run OASIS Multi-Agent System with virtual environment")
+    parser.add_argument("--cli-test", "-t", action="store_true", 
+                       help="Run backend in CLI test mode (for development/testing)")
+    parser.add_argument("--gui", "-g", action="store_true", 
+                       help="Start complete OASIS application (same as default)")
+    
+    # Legacy support for old flags
     parser.add_argument("--backend", "-b", action="store_true", 
-                       help="Run backend only (CLI mode)")
+                       help="Run backend only (deprecated, use --cli-test)")
     parser.add_argument("--frontend", "-f", action="store_true", 
-                       help="Run frontend only (GUI mode)")
+                       help="Run frontend only (deprecated, default runs complete app)")
     
     args = parser.parse_args()
     
@@ -33,14 +39,22 @@ def main():
         print("cd backend && python setup.py")
         return 1
 
-    print("🚀 Starting OASIS...")
+    print("🚀 Starting OASIS Multi-Agent System...")
     try:
         # Build command arguments
         cmd_args = [str(venv_python), "main.py"]
-        if args.backend:
-            cmd_args.append("--backend")
+        
+        # Handle arguments
+        if args.backend or args.cli_test:
+            cmd_args.append("--cli-test")
+            print("📋 Running in CLI test mode...")
         elif args.frontend:
-            cmd_args.append("--frontend")
+            print("ℹ️  Note: --frontend is deprecated, running complete application")
+        elif args.gui:
+            cmd_args.append("--gui")
+            print("🖥️  Running complete OASIS application...")
+        else:
+            print("🖥️  Running complete OASIS application (default)...")
         
         # Run main.py using the virtual environment Python
         subprocess.run(cmd_args, check=True)

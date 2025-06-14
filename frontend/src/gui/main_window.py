@@ -11,8 +11,11 @@ import os
 import mimetypes
 import sys
 
-# Add the backend path for importing
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'src'))
+# Add the backend path for importing - ensure proper path resolution
+backend_src_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'backend', 'src')
+backend_src_path = os.path.abspath(backend_src_path)
+if backend_src_path not in sys.path:
+    sys.path.insert(0, backend_src_path)
 
 # Try to import PIL for image preview
 try:
@@ -21,8 +24,7 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-from core.agent import OASISAgent
-from config.settings import settings
+from oasis import OASIS
 
 
 class FileUploadFrame(ctk.CTkFrame):
@@ -199,26 +201,24 @@ class FileUploadFrame(ctk.CTkFrame):
         )
         details_label.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 5))
         
-        # Remove button - larger
+        # Remove button
         remove_button = ctk.CTkButton(
             item_frame,
             text="❌",
-            width=45,  # Middle ground size
-            height=45,  # Middle ground size
-            command=lambda: self.remove_file(file_info['path'], item_frame),
-            font=ctk.CTkFont(size=18)  # Middle ground: 18pt
+            width=30,
+            height=30,
+            command=lambda: self.remove_file(file_info['path'], item_frame)
         )
         remove_button.grid(row=0, column=2, rowspan=2, padx=10, pady=5)
         
-        # Preview button for images (only if PIL is available) - larger
+        # Preview button for images
         if file_info['category'] == 'image' and PIL_AVAILABLE:
             preview_button = ctk.CTkButton(
                 item_frame,
                 text="👁️",
-                width=45,  # Middle ground size
-                height=45,  # Middle ground size
-                command=lambda: self.preview_image(file_info['path']),
-                font=ctk.CTkFont(size=18)  # Middle ground: 18pt
+                width=30,
+                height=30,
+                command=lambda: self.preview_image(file_info['path'])
             )
             preview_button.grid(row=0, column=1, rowspan=2, padx=5, pady=5)
     
@@ -227,7 +227,7 @@ class FileUploadFrame(ctk.CTkFrame):
         # Remove from uploaded files list
         self.uploaded_files = [f for f in self.uploaded_files if f['path'] != file_path]
         
-        # Remove UI element
+        # Remove the widget
         item_frame.destroy()
         
         # Hide file list if empty
@@ -235,36 +235,33 @@ class FileUploadFrame(ctk.CTkFrame):
             self.file_list_frame.grid_remove()
     
     def preview_image(self, file_path: str):
-        """Show image preview in a popup."""
-        if not PIL_AVAILABLE:
-            messagebox.showwarning("Preview Unavailable", "PIL (Pillow) is required for image preview.\nInstall with: pip install pillow")
-            return
-        
+        """Show image preview dialog."""
         try:
             # Create preview window
             preview_window = ctk.CTkToplevel(self)
-            preview_window.title("Image Preview")
-            preview_window.geometry("600x500")
+            preview_window.title(f"Preview: {Path(file_path).name}")
+            preview_window.geometry("800x600")
             
             # Load and resize image
             image = Image.open(file_path)
-            # Resize to fit preview while maintaining aspect ratio
-            image.thumbnail((550, 400), Image.Resampling.LANCZOS)
             
-            # Convert to PhotoImage
+            # Calculate size to fit in window while maintaining aspect ratio
+            window_width, window_height = 750, 550
+            img_width, img_height = image.size
+            
+            ratio = min(window_width/img_width, window_height/img_height)
+            new_width = int(img_width * ratio)
+            new_height = int(img_height * ratio)
+            
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(image)
             
-            # Create label to display image
-            image_label = tk.Label(preview_window, image=photo)
-            image_label.image = photo  # Keep a reference
-            image_label.pack(pady=20)
+            # Display image
+            label = ctk.CTkLabel(preview_window, image=photo, text="")
+            label.pack(expand=True, fill="both", padx=20, pady=20)
             
-            # File info
-            info_label = ctk.CTkLabel(
-                preview_window,
-                text=f"File: {Path(file_path).name}\nSize: {image.size[0]}x{image.size[1]} pixels"
-            )
-            info_label.pack(pady=10)
+            # Keep reference to prevent garbage collection
+            label.image = photo
             
         except Exception as e:
             messagebox.showerror("Preview Error", f"Could not preview image: {str(e)}")
@@ -277,7 +274,7 @@ class FileUploadFrame(ctk.CTkFrame):
         """Clear all uploaded files."""
         self.uploaded_files.clear()
         
-        # Clear UI
+        # Remove all file item widgets
         for widget in self.file_list_frame.winfo_children():
             widget.destroy()
         
@@ -287,223 +284,219 @@ class FileUploadFrame(ctk.CTkFrame):
 
 class OASISMainWindow:
     """
-    Main application window with simple and developer modes.
+    Main application window for OASIS.
     """
     
     def __init__(self):
-        """Initialize the main window."""
-        self.agent: Optional[OASISAgent] = None
-        self.current_mode = settings.app_mode
-        
-        # Set up the main window
-        ctk.set_appearance_mode("dark")  # Claude uses dark mode
-        ctk.set_default_color_theme("blue")
-        
         self.root = ctk.CTk()
-        self.root.title("OASIS - AI Assistant")
-        
-        # Set window size (larger for better readability)
-        width, height = 1600, 1000  # Middle ground size - comfortable but not overwhelming
-        self.root.geometry(f"{width}x{height}")
-        
-        # Initialize UI components
+        self.agent: Optional[OASIS] = None
+        self.current_mode = "user"  # "user" or "developer"
         self.setup_ui()
         self.setup_agent()
-    
-    def setup_ui(self):
-        """Set up the user interface."""
-        # Configure grid weights
-        self.root.grid_columnconfigure(0, weight=1)
-        self.root.grid_rowconfigure(1, weight=1)
-        
-        # Create header frame
-        self.create_header()
-        
-        # Create main content area
-        self.create_main_content()
-        
-        # Create status bar
-        self.create_status_bar()
-    
-    def create_header(self):
-        """Create the header with title and mode toggle."""
-        header_frame = ctk.CTkFrame(self.root)
-        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-        header_frame.grid_columnconfigure(1, weight=1)
-        
-        # Title - Claude style large font
-        title_label = ctk.CTkLabel(
-            header_frame, 
-            text="OASIS", 
-            font=ctk.CTkFont(size=42, weight="bold")  # Middle ground: 42pt (between 32 and 64)
-        )
-        title_label.grid(row=0, column=0, padx=20, pady=10)
-        
-        # Subtitle - larger font
-        subtitle_label = ctk.CTkLabel(
-            header_frame,
-            text="Opensource AI Small-model Integration System",
-            font=ctk.CTkFont(size=20)  # Middle ground: 20pt (between 16 and 32)
-        )
-        subtitle_label.grid(row=1, column=0, padx=20, pady=(0, 10))
-        
-        # Mode toggle
-        mode_frame = ctk.CTkFrame(header_frame)
-        mode_frame.grid(row=0, column=2, rowspan=2, padx=20, pady=10)
-        
-        mode_label = ctk.CTkLabel(
-            mode_frame, 
-            text="Mode:",
-            font=ctk.CTkFont(size=18)  # Middle ground: 18pt
-        )
-        mode_label.grid(row=0, column=0, padx=10, pady=5)
-        
-        self.mode_var = tk.StringVar(value=self.current_mode.title())
-        self.mode_toggle = ctk.CTkSegmentedButton(
-            mode_frame,
-            values=["Simple", "Developer"],
-            variable=self.mode_var,
-            command=self.on_mode_change,
-            font=ctk.CTkFont(size=18)  # Middle ground: 18pt
-        )
-        self.mode_toggle.grid(row=0, column=1, padx=10, pady=5)
-    
-    def create_main_content(self):
-        """Create the main content area."""
-        # Main container with paned window for resizable sections
-        self.main_paned = ctk.CTkFrame(self.root)
-        self.main_paned.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
-        self.main_paned.grid_columnconfigure(0, weight=2)  # Chat area gets more space
-        self.main_paned.grid_columnconfigure(1, weight=1)  # File area gets less space
-        self.main_paned.grid_rowconfigure(0, weight=1)
-        
-        # Chat area (left side)
-        self.create_chat_interface(self.main_paned)
-        
-        # File upload area (right side) - initially hidden
-        self.create_file_upload_area(self.main_paned)
-        
-        # Input area (bottom)
-        self.create_input_area(self.main_paned)
-    
-    def create_chat_interface(self, parent):
-        """Create the chat interface area."""
-        chat_frame = ctk.CTkFrame(parent)
-        chat_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5)
-        chat_frame.grid_columnconfigure(0, weight=1)
-        chat_frame.grid_rowconfigure(0, weight=1)
-        
-        # Chat display - Claude style larger font for better readability
-        self.chat_display = ctk.CTkTextbox(
-            chat_frame,
-            wrap="word",
-            font=ctk.CTkFont(size=20)  # Middle ground: 20pt (between 16 and 32)
-        )
-        self.chat_display.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
         # Add welcome message
         welcome_msg = self.get_welcome_message()
-        self.chat_display.insert("end", welcome_msg + "\n\n")
+        self.add_system_message(welcome_msg)
+        
+        # Configure window
+        self.root.title("OASIS - Multi-Agent AI System")
+        self.root.geometry("1200x800")
+        self.root.minsize(800, 600)
+    
+    def setup_ui(self):
+        """Set up the user interface."""
+        # Configure grid
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        
+        # Create main components
+        self.create_header()
+        self.create_main_content()
+        self.create_status_bar()
+    
+    def create_header(self):
+        """Create the header with title and mode selector."""
+        header_frame = ctk.CTkFrame(self.root, height=100)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        header_frame.grid_columnconfigure(1, weight=1)
+        header_frame.grid_propagate(False)
+        
+        # Title and logo
+        title_frame = ctk.CTkFrame(header_frame)
+        title_frame.grid(row=0, column=0, sticky="w", padx=20, pady=20)
+        
+        title_label = ctk.CTkLabel(
+            title_frame,
+            text="🚀 OASIS",
+            font=ctk.CTkFont(size=36, weight="bold")
+        )
+        title_label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        
+        subtitle_label = ctk.CTkLabel(
+            title_frame,
+            text="Multi-Agent AI System",
+            font=ctk.CTkFont(size=18),
+            text_color="gray"
+        )
+        subtitle_label.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 5))
+        
+        # Mode selector
+        mode_frame = ctk.CTkFrame(header_frame)
+        mode_frame.grid(row=0, column=2, sticky="e", padx=20, pady=20)
+        
+        mode_label = ctk.CTkLabel(
+            mode_frame,
+            text="Mode:",
+            font=ctk.CTkFont(size=16)
+        )
+        mode_label.grid(row=0, column=0, padx=(10, 5), pady=10)
+        
+        self.mode_selector = ctk.CTkSegmentedButton(
+            mode_frame,
+            values=["User", "Developer"],
+            command=self.on_mode_change,
+            font=ctk.CTkFont(size=14)
+        )
+        self.mode_selector.set("User")
+        self.mode_selector.grid(row=0, column=1, padx=(5, 10), pady=10)
+    
+    def create_main_content(self):
+        """Create the main content area."""
+        main_frame = ctk.CTkFrame(self.root)
+        main_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+        
+        # Create paned window for resizable panels
+        paned_window = ctk.CTkFrame(main_frame)
+        paned_window.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        paned_window.grid_rowconfigure(0, weight=1)
+        paned_window.grid_columnconfigure(0, weight=1)
+        
+        # Chat interface
+        self.create_chat_interface(paned_window)
+        
+        # File upload area (initially hidden)
+        self.create_file_upload_area(paned_window)
+        
+        # Input area
+        self.create_input_area(paned_window)
+    
+    def create_chat_interface(self, parent):
+        """Create the chat interface."""
+        chat_frame = ctk.CTkFrame(parent)
+        chat_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        chat_frame.grid_rowconfigure(0, weight=1)
+        chat_frame.grid_columnconfigure(0, weight=1)
+        
+        # Chat display
+        self.chat_display = ctk.CTkTextbox(
+            chat_frame,
+            font=ctk.CTkFont(size=14),
+            wrap="word"
+        )
+        self.chat_display.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         self.chat_display.configure(state="disabled")
     
     def create_file_upload_area(self, parent):
         """Create the file upload area."""
-        # File upload frame (initially hidden)
         self.file_upload_frame = FileUploadFrame(parent, callback=self.on_file_uploaded)
-        self.file_upload_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=5)
-        self.file_upload_frame.grid_remove()  # Hide initially
+        self.file_upload_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+        self.file_upload_frame.grid_remove()  # Initially hidden
     
     def create_input_area(self, parent):
         """Create the input area."""
         input_frame = ctk.CTkFrame(parent)
-        input_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
-        input_frame.grid_columnconfigure(0, weight=1)
+        input_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        input_frame.grid_columnconfigure(1, weight=1)
         
-        # Message input - Claude style larger font
-        self.message_entry = ctk.CTkEntry(
-            input_frame,
-            placeholder_text="Type your message here...",
-            font=ctk.CTkFont(size=20),  # Middle ground: 20pt
-            height=50  # Middle ground height
-        )
-        self.message_entry.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        self.message_entry.bind("<Return>", self.on_send_message)
-        
-        # Send button - larger with bigger font
-        self.send_button = ctk.CTkButton(
-            input_frame,
-            text="Send",
-            command=self.on_send_message,
-            width=130,  # Middle ground width
-            height=50,  # Middle ground height
-            font=ctk.CTkFont(size=20, weight="bold")  # Middle ground: 20pt
-        )
-        self.send_button.grid(row=0, column=1, padx=(0, 10), pady=10)
-        
-        # File toggle button - larger with bigger font
+        # File toggle button
         self.file_toggle_button = ctk.CTkButton(
             input_frame,
             text="📁 Files",
+            width=80,
             command=self.toggle_file_area,
-            width=130,  # Middle ground width
-            height=50,  # Middle ground height
-            font=ctk.CTkFont(size=20)  # Middle ground: 20pt
+            font=ctk.CTkFont(size=14)
         )
-        self.file_toggle_button.grid(row=0, column=2, padx=(0, 10), pady=10)
+        self.file_toggle_button.grid(row=0, column=0, padx=(10, 5), pady=10)
         
-        # Clear files button (initially hidden) - larger
+        # Message input
+        self.message_entry = ctk.CTkEntry(
+            input_frame,
+            placeholder_text="Type your message here...",
+            font=ctk.CTkFont(size=14),
+            height=40
+        )
+        self.message_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=10)
+        self.message_entry.bind("<Return>", self.on_send_message)
+        self.message_entry.bind("<Shift-Return>", lambda e: None)  # Allow Shift+Enter for new line
+        
+        # Send button
+        self.send_button = ctk.CTkButton(
+            input_frame,
+            text="Send",
+            width=80,
+            command=self.on_send_message,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.send_button.grid(row=0, column=2, padx=(5, 10), pady=10)
+        
+        # File controls (initially hidden)
         self.clear_files_button = ctk.CTkButton(
             input_frame,
             text="🗑️ Clear",
+            width=80,
             command=self.clear_uploaded_files,
-            width=130,  # Middle ground width
-            height=50,  # Middle ground height
-            font=ctk.CTkFont(size=20)  # Middle ground: 20pt
+            font=ctk.CTkFont(size=12)
         )
-        self.clear_files_button.grid(row=0, column=3, padx=(0, 10), pady=10)
-        self.clear_files_button.grid_remove()  # Hide initially
+        self.clear_files_button.grid(row=1, column=0, padx=(10, 5), pady=(0, 10))
+        self.clear_files_button.grid_remove()  # Initially hidden
         
-        # Show/hide buttons based on mode
-        self.update_ui_for_mode()
+        # File count label
+        self.file_count_label = ctk.CTkLabel(
+            input_frame,
+            text="📎 0 files",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.file_count_label.grid(row=1, column=1, sticky="w", padx=5, pady=(0, 10))
+        self.file_count_label.grid_remove()  # Hide initially
     
     def create_status_bar(self):
         """Create the status bar."""
-        self.status_frame = ctk.CTkFrame(self.root)
-        self.status_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
-        self.status_frame.grid_columnconfigure(1, weight=1)
+        status_frame = ctk.CTkFrame(self.root, height=40)
+        status_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
+        status_frame.grid_columnconfigure(0, weight=1)
+        status_frame.grid_propagate(False)
         
-        # Status label - larger font
+        # Status label
         self.status_label = ctk.CTkLabel(
-            self.status_frame,
+            status_frame,
             text="Ready",
-            font=ctk.CTkFont(size=16)  # Middle ground: 16pt
+            font=ctk.CTkFont(size=12),
+            anchor="w"
         )
-        self.status_label.grid(row=0, column=0, padx=10, pady=5)
+        self.status_label.grid(row=0, column=0, sticky="w", padx=15, pady=10)
         
         # Progress bar (initially hidden)
-        self.progress_bar = ctk.CTkProgressBar(self.status_frame)
-        self.progress_bar.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
-        self.progress_bar.grid_remove()  # Hide initially
-        
-        # File count label (initially hidden) - larger font
-        self.file_count_label = ctk.CTkLabel(
-            self.status_frame,
-            text="",
-            font=ctk.CTkFont(size=16)  # Middle ground: 16pt
+        self.progress_bar = ctk.CTkProgressBar(
+            status_frame,
+            mode="indeterminate",
+            height=20
         )
-        self.file_count_label.grid(row=0, column=2, padx=10, pady=5)
-        self.file_count_label.grid_remove()  # Hide initially
+        self.progress_bar.grid(row=0, column=1, sticky="e", padx=15, pady=10)
+        self.progress_bar.grid_remove()  # Initially hidden
     
     def setup_agent(self):
-        """Initialize the OASIS agent."""
+        """Initialize the OASIS system."""
         try:
-            self.agent = OASISAgent()
-            self.update_status("OASIS agent initialized successfully")
+            self.agent = OASIS()
+            self.update_status("OASIS multi-agent system initialized successfully")
         except Exception as e:
-            self.update_status(f"Error initializing agent: {str(e)}")
+            self.update_status(f"Error initializing OASIS: {str(e)}")
             messagebox.showerror("Initialization Error", 
-                               f"Failed to initialize OASIS agent:\n{str(e)}\n\n"
-                               "Please check your .env file and ensure GOOGLE_API_KEY is set.")
+                               f"Failed to initialize OASIS system:\n{str(e)}\n\n"
+                               "Please check your configuration and ensure all dependencies are installed.")
     
     def get_welcome_message(self) -> str:
         """Get the welcome message based on current mode."""
@@ -511,14 +504,14 @@ class OASISMainWindow:
             return """🔧 OASIS Developer Mode
 
 Welcome to OASIS! You're in developer mode with access to:
-• Detailed technical information and parameters
-• Advanced tool configurations  
-• Processing logs and system information
-• Direct tool calling capabilities
-• File upload and processing
+• Detailed streaming updates from each agent
+• Multi-agent supervisor coordination logs  
+• Task delegation and handoff information
+• System performance metrics
+• File upload and processing capabilities
 
 Try asking questions like:
-• "What are your capabilities?"
+• "What are the benefits of renewable energy?"
 • "Help me process this image"
 • "Transcribe this audio file"
 """
@@ -527,10 +520,10 @@ Try asking questions like:
 
 I'm your AI assistant powered by advanced multi-agent technology. I can help you with:
 • Text processing and analysis
-• Image recognition and generation
+• Image recognition and OCR
 • Audio transcription and analysis
 • Document summarization
-• Multi-modal tasks
+• Video content analysis
 
 Simply type your message below or upload files to get started!
 """
@@ -588,10 +581,6 @@ Simply type your message below or upload files to get started!
         self.update_file_count()
         self.add_system_message("🗑️ All files cleared")
         
-        # Also clear the agent's file list
-        if self.agent:
-            self.agent.clear_uploaded_files()
-        
         # Reset pending message if any
         if hasattr(self, 'pending_message') and self.pending_message:
             self.message_entry.configure(placeholder_text="Type your message here...")
@@ -642,27 +631,24 @@ Simply type your message below or upload files to get started!
         threading.Thread(target=self.process_message, args=(enhanced_message,), daemon=True).start()
     
     def process_message(self, message: str):
-        """Process user message with the agent."""
+        """Process user message with the OASIS system."""
         if not self.agent:
-            self.add_system_message("❌ Agent not initialized. Please restart the application.")
+            self.add_system_message("❌ OASIS not initialized. Please restart the application.")
             return
         
         self.update_status("Processing...")
         self.show_progress()
         
         try:
-            # Get uploaded files
-            uploaded_files = [f['path'] for f in self.file_upload_frame.get_uploaded_files()]
-            
-            # Update agent with uploaded files
-            if uploaded_files:
-                self.agent.set_uploaded_files(uploaded_files)
+            # Get uploaded files - let OASIS handle the categorization
+            uploaded_files = self.file_upload_frame.get_uploaded_files()
+            file_paths = [file_info['path'] for file_info in uploaded_files]
             
             # Use streaming for better user experience in developer mode
             if self.current_mode == "developer":
-                self._process_message_streaming(message)
+                self._process_message_streaming(message, file_paths)
             else:
-                self._process_message_sync(message)
+                self._process_message_sync(message, file_paths)
                 
         except Exception as e:
             self.add_system_message(f"❌ Error processing message: {str(e)}")
@@ -670,172 +656,107 @@ Simply type your message below or upload files to get started!
             self.hide_progress()
             self.update_status("Ready")
     
-    def _process_message_sync(self, message: str):
-        """Process message synchronously (simple mode)."""
-        uploaded_files = [f['path'] for f in self.file_upload_frame.get_uploaded_files()]
-        response = self.agent.process_message(message, stream=False, uploaded_files=uploaded_files)
-        
-        if isinstance(response, dict):
-            # Check if files are required
-            if response.get('requires_upload', False):
-                self.handle_file_requirement(response)
-                return
-            
-            final_answer = response.get('final_answer', 'No response')
-            self.add_agent_message(final_answer)
-        else:
-            self.add_agent_message(str(response))
+    def _process_message_sync(self, message: str, file_paths: list):
+        """Process message synchronously (simple mode) - using streaming for better debugging."""
+        # Use streaming internally even in sync mode to see the delegation flow
+        self._process_message_streaming(message, file_paths)
     
-    def _process_message_streaming(self, message: str):
-        """Process message with streaming updates (developer mode)."""
+    def _process_message_streaming(self, message: str, file_paths: list):
+        """Process message with streaming updates showing detailed delegation flow."""
         try:
-            # Get uploaded files
-            uploaded_files = [f['path'] for f in self.file_upload_frame.get_uploaded_files()]
-            
             # Get streaming response
-            stream = self.agent.process_message(message, stream=True, uploaded_files=uploaded_files)
+            if file_paths:
+                stream = self.agent.process_message_with_files(message, file_paths, stream=True)
+            else:
+                stream = self.agent.process_message(message, stream=True)
             
-            # Track the final response and conversation state
+            # Track the final response
             final_response = ""
-            agents_used = []
-            tool_calls = []
-            last_agent_response = ""
+            chunk_count = 0
             
-            for update in stream:
-                if isinstance(update, dict):
-                    update_type = update.get('type', 'unknown')
-                    content = update.get('content', '')
-                    
-                    # Handle requirement checking
-                    if update_type == 'requirement_check':
-                        self.add_system_message(f"🔍 {content}")
-                    elif update_type == 'file_required':
-                        self.handle_file_requirement_streaming(update)
-                        return  # Stop processing, wait for file upload
-                    elif update_type == 'file_status':
-                        files = update.get('files', [])
-                        self.add_system_message(f"📁 {content}")
-                    
-                    # Display different types of streaming updates
-                    elif update_type == 'status':
-                        self.update_status(content)
-                    elif update_type == 'bigtool_analysis':
-                        self.add_system_message(f"🧠 {content}")
-                    elif update_type == 'tool_selection':
-                        tools = update.get('tools', [])
-                        category = update.get('category', 'unknown')
-                        self.add_system_message(f"🔧 Selected {category.upper()} tools: {', '.join(tools)}")
-                    elif update_type == 'supervisor_action':
-                        self.add_system_message(f"🎯 {content}")
-                    elif update_type == 'handoff':
-                        target = update.get('target_agent', 'unknown')
-                        agents_used.append(target)
-                        self.add_system_message(f"📞 {content}")
-                    elif update_type == 'agent_start':
-                        agent = update.get('agent', 'unknown')
-                        if agent not in agents_used:
-                            agents_used.append(agent)
-                        self.add_system_message(f"🤖 {content}")
-                    elif update_type == 'tool_call':
-                        tool_name = update.get('tool_name', 'unknown')
-                        tool_calls.append(tool_name)
-                        self.add_system_message(f"⚙️ {content}")
-                    elif update_type == 'agent_response':
-                        # Store the latest agent response content
-                        full_content = update.get('full_content', '')
-                        if full_content:
-                            last_agent_response = full_content
-                        self.add_system_message(f"💬 {content}")
-                    elif update_type == 'completion':
-                        # Process completion and extract final response
-                        self.add_system_message("✅ Task completed!")
-                        
-                        # Use the last agent response as the final answer
-                        if last_agent_response:
-                            final_response = last_agent_response
-                            self.add_agent_message(final_response)
-                        
-                        # Add summary for developer mode
-                        completion_agents = update.get('agents_used', agents_used)
-                        completion_tool_calls = update.get('tool_calls', len(tool_calls))
-                        bigtool_enabled = update.get('bigtool_enabled', False)
-                        
-                        summary_parts = []
-                        if completion_agents:
-                            summary_parts.append(f"Agents: {', '.join(set(completion_agents))}")
-                        if completion_tool_calls > 0:
-                            summary_parts.append(f"Tools: {completion_tool_calls} called")
-                        if bigtool_enabled:
-                            summary_parts.append("BigTool: Enabled")
-                        
-                        if summary_parts:
-                            self.add_system_message(f"📊 Summary: {' | '.join(summary_parts)}")
-                        
-                        break
-                    elif update_type == 'error':
-                        # Handle streaming errors
-                        self.add_system_message(f"❌ {content}")
-                        break
+            print("=" * 80)
+            print("DETAILED STREAMING DEBUG - DELEGATION FLOW")
+            print("=" * 80)
             
-            # If no final response was captured from streaming, fall back to sync mode
-            if not final_response:
-                self.add_system_message("🔄 No final response captured, switching to sync mode...")
-                self._process_message_sync(message)
+            for chunk in stream:
+                chunk_count += 1
+                print(f"\n--- CHUNK {chunk_count} ---")
+                print(f"Chunk type: {type(chunk)}")
+                print(f"Chunk content: {chunk}")
+                
+                # Handle the new streaming format from LangGraph with subgraphs
+                if isinstance(chunk, tuple) and len(chunk) == 2:
+                    node_path, node_data = chunk
+                    print(f"Node path: {node_path}")
+                    print(f"Node data keys: {list(node_data.keys()) if isinstance(node_data, dict) else 'Not a dict'}")
+                    
+                    if node_data and isinstance(node_data, dict):
+                        # Look for messages in the node data
+                        if 'messages' in node_data and node_data['messages']:
+                            latest_message = node_data['messages'][-1]
+                            print(f"Latest message type: {type(latest_message)}")
+                            print(f"Latest message: {latest_message}")
+                            
+                            if hasattr(latest_message, 'content'):
+                                content = latest_message.content.strip()
+                                print(f"Message content: '{content}'")
+                                
+                                if content:
+                                    final_response = content
+                                    # Show which agent is processing
+                                    if node_path:
+                                        agent_name = str(node_path[0]).split(':')[0] if isinstance(node_path, tuple) else str(node_path)
+                                        print(f"Agent: {agent_name}")
+                                        self.add_system_message(f"🔄 Update from {agent_name}: {content[:100]}{'...' if len(content) > 100 else ''}")
+                        
+                        # Look for tool calls
+                        if 'agent' in node_data and isinstance(node_data['agent'], dict):
+                            agent_data = node_data['agent']
+                            if 'messages' in agent_data and agent_data['messages']:
+                                agent_message = agent_data['messages'][-1]
+                                if hasattr(agent_message, 'tool_calls') and agent_message.tool_calls:
+                                    for tool_call in agent_message.tool_calls:
+                                        print(f"Tool call: {tool_call}")
+                                        self.add_system_message(f"🔧 Tool called: {tool_call.get('name', 'Unknown')}")
+                        
+                        # Look for tool responses
+                        if 'tools' in node_data and isinstance(node_data['tools'], dict):
+                            tools_data = node_data['tools']
+                            if 'messages' in tools_data and tools_data['messages']:
+                                tool_message = tools_data['messages'][-1]
+                                print(f"Tool response: {tool_message}")
+                                if hasattr(tool_message, 'content'):
+                                    self.add_system_message(f"🔧 Tool response: {tool_message.content[:100]}{'...' if len(tool_message.content) > 100 else ''}")
+                                
+                elif isinstance(chunk, dict):
+                    # Handle legacy format
+                    print(f"Dict chunk keys: {list(chunk.keys())}")
+                    for node_name, node_data in chunk.items():
+                        print(f"Processing node: {node_name}")
+                        if node_data and 'messages' in node_data and node_data['messages']:
+                            latest_message = node_data['messages'][-1]
+                            if hasattr(latest_message, 'content'):
+                                content = latest_message.content.strip()
+                                if content:
+                                    final_response = content
+                                    print(f"Final response from {node_name}: {content}")
+                                    self.add_system_message(f"🔄 Update from {node_name}: {content[:100]}{'...' if len(content) > 100 else ''}")
+            
+            print(f"\n--- FINAL RESULT ---")
+            print(f"Final response: '{final_response}'")
+            print("=" * 80)
+            
+            # Display final response
+            if final_response:
+                self.add_agent_message(final_response)
+            else:
+                self.add_agent_message("Task completed - no final response")
                 
         except Exception as e:
-            # Fall back to sync mode on streaming error
-            self.add_system_message(f"⚠️ Streaming failed, using sync mode: {str(e)}")
-            self._process_message_sync(message)
-    
-    def handle_file_requirement(self, response):
-        """Handle file requirement request in sync mode."""
-        missing_files = response.get('missing_files', [])
-        upload_message = response.get('final_answer', 'Files are required for this task.')
-        
-        # Display the requirement message
-        self.add_agent_message(upload_message)
-        
-        # Show file upload area if not already visible
-        if not self.file_upload_frame.winfo_viewable():
-            self.toggle_file_area()
-        
-        # Highlight required file types
-        if missing_files:
-            file_types = []
-            for file_req in missing_files:
-                file_types.append(file_req.get('description', 'files'))
-            
-            self.add_system_message(f"💡 Tip: Upload {', '.join(file_types)} to continue with your request.")
-        
-        # Store the original message for reprocessing after file upload
-        self.pending_message = self.message_entry.get()
-        self.message_entry.delete(0, 'end')
-        self.message_entry.configure(placeholder_text="Upload files first, then I'll process your request...")
-    
-    def handle_file_requirement_streaming(self, update):
-        """Handle file requirement request in streaming mode."""
-        missing_files = update.get('missing_files', [])
-        upload_message = update.get('content', 'Files are required for this task.')
-        
-        # Display the requirement message
-        self.add_agent_message(upload_message)
-        
-        # Show file upload area if not already visible
-        if not self.file_upload_frame.winfo_viewable():
-            self.toggle_file_area()
-        
-        # Highlight required file types
-        if missing_files:
-            file_types = []
-            for file_req in missing_files:
-                file_types.append(file_req.get('description', 'files'))
-            
-            self.add_system_message(f"💡 Tip: Upload {', '.join(file_types)} to continue with your request.")
-        
-        # Store the original message for reprocessing after file upload
-        self.pending_message = self.message_entry.get()
-        self.message_entry.delete(0, 'end')
-        self.message_entry.configure(placeholder_text="Upload files first, then I'll process your request...")
+            print(f"STREAMING ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            self.add_system_message(f"⚠️ Streaming error: {str(e)}")
     
     def add_user_message(self, message: str):
         """Add user message to chat."""

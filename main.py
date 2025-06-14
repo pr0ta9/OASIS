@@ -40,52 +40,57 @@ def run_cli_test():
     setup_google_cloud_credentials()
     
     try:
-        from core.agent import OASISAgent
-        from config.settings import settings
+        from oasis import OASIS
         
-        # Initialize the agent
-        agent = OASISAgent()
-        print("✅ Agent initialized successfully!")
+        # Initialize the OASIS system
+        oasis = OASIS()
+        print("✅ OASIS system initialized successfully!")
         
         # Test with a simple message
-        test_message = "Hello! Can you tell me about the system capabilities?"
+        test_message = "Hello! Can you tell me about renewable energy benefits?"
         print(f"\n📝 Testing with message: '{test_message}'")
         
-        # Process the message
-        result = agent.process_message(test_message)
+        # Process the message (sync mode for testing)
+        print("\n🔄 Processing message...")
+        result = oasis.process_message(test_message, stream=False)
         
-        print(f"\n🤖 Agent Response:")
-        print(f"Final Answer: {result.get('final_answer', 'No response')}")
-        
-        # Handle tool_calls properly - it might be an integer count or a list
-        tool_calls = result.get('tool_calls', 0)
-        if isinstance(tool_calls, int):
-            print(f"Tool Calls: {tool_calls}")
+        print(f"\n🤖 OASIS Response:")
+        messages = result.get("messages", [])
+        if messages:
+            final_message = messages[-1]
+            if hasattr(final_message, 'content'):
+                print(f"Final Answer: {final_message.content}")
+            else:
+                print(f"Final Answer: {str(final_message)}")
         else:
-            print(f"Tool Calls: {len(tool_calls)}")
-            
-        print(f"Processing Status: {result.get('processing_status', 'Unknown')}")
+            print("Final Answer: No response generated")
         
-        # Show available tools (with error handling)
-        try:
-            tools = agent.get_capabilities()
-            print(f"\n🔧 System Capabilities:")
-            for key, value in tools.items():
-                print(f"  {key}: {value}")
-        except AttributeError:
-            print(f"\n🔧 Available Tools: Tool listing not available in this agent version")
-            
+        print(f"Total Messages: {len(messages)}")
+        print(f"Processing Status: Complete")
+        
+        # Test streaming mode
+        print(f"\n🌊 Testing streaming mode...")
+        print("Streaming chunks:")
+        for chunk in oasis.process_message("Explain how solar panels work", stream=True):
+            if isinstance(chunk, dict):
+                for node_name, node_data in chunk.items():
+                    print(f"  [{node_name}] - {len(node_data.get('messages', []))} messages")
+            else:
+                print(f"  [CHUNK] - {type(chunk)}: {chunk}")
+        
         return 0
         
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
 def run_oasis_application():
     """Run the complete OASIS application with GUI and integrated backend."""
     print("🚀 Starting OASIS Application...")
-    print("🔧 Backend: Integrated agent system")
+    print("🔧 Backend: Multi-agent supervisor system")
     print("🖥️  Frontend: Interactive GUI")
     
     # Set up Google Cloud credentials
@@ -107,13 +112,15 @@ def run_oasis_application():
         
     except Exception as e:
         print(f"❌ Error starting OASIS: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
 def main():
     """Main entry point for OASIS."""
     parser = argparse.ArgumentParser(
-        description="OASIS - Opensource AI Small-model Integration System",
+        description="OASIS - Multi-agent AI System with Supervisor Architecture",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -123,10 +130,10 @@ Examples:
   
 The default behavior runs the complete OASIS application with:
 - Interactive GUI for easy interaction
-- Integrated backend with AI agents
+- Multi-agent supervisor system
 - File upload and processing capabilities
 - Real-time streaming responses
-- Multi-modal AI capabilities
+- Delegated task execution
         """
     )
     
