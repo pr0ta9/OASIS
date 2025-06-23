@@ -6,10 +6,11 @@ This package contains image analysis and processing tools including:
 - Text overlay/replacement for translating or modifying text in images
 """
 
-from .text_detection import detect_text_tool
+from .text_detection import extract_text_with_positions_tool, extract_text_only_tool
 from .text_overlay import text_overlay_tool
 
 __all__ = [
-    "detect_text_tool",
+    "extract_text_with_positions_tool",
+    "extract_text_only_tool", 
     "text_overlay_tool"
 ] 

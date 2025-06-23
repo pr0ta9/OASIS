@@ -335,7 +335,7 @@ def get_system_info() -> str:
 • Components: Multi-agent supervisor system with specialist agents
 • Capabilities: Text, image, audio, document, and video processing
 • AI Models: Google Vertex AI (Gemini 2.0 Flash)
-• Tools: MongoDB BigTool with vector search
+• Tools: Specialized agent tools for multi-modal processing
 • Memory: Conversation persistence enabled
 """
 

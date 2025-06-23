@@ -691,33 +691,38 @@ Simply type your message below or upload files to get started!
                     print(f"Node data keys: {list(node_data.keys()) if isinstance(node_data, dict) else 'Not a dict'}")
                     
                     if node_data and isinstance(node_data, dict):
-                        # Look for messages in the node data
+                        # Look for messages in the node data - check both direct messages and agent messages
+                        messages_to_check = []
+                        
+                        # Check direct messages
                         if 'messages' in node_data and node_data['messages']:
-                            latest_message = node_data['messages'][-1]
-                            print(f"Latest message type: {type(latest_message)}")
-                            print(f"Latest message: {latest_message}")
-                            
-                            if hasattr(latest_message, 'content'):
-                                content = latest_message.content.strip()
+                            messages_to_check.extend(node_data['messages'])
+                        
+                        # Check agent messages (this is where supervisor final responses are)
+                        if 'agent' in node_data and isinstance(node_data['agent'], dict):
+                            agent_data = node_data['agent']
+                            if 'messages' in agent_data and agent_data['messages']:
+                                messages_to_check.extend(agent_data['messages'])
+                        
+                        # Process all messages and find the latest content
+                        for message in messages_to_check:
+                            if hasattr(message, 'content'):
+                                content = message.content.strip()
                                 print(f"Message content: '{content}'")
                                 
-                                if content:
+                                if content and not content.startswith('Transferring'):
                                     final_response = content
                                     # Show which agent is processing
                                     if node_path:
                                         agent_name = str(node_path[0]).split(':')[0] if isinstance(node_path, tuple) else str(node_path)
                                         print(f"Agent: {agent_name}")
                                         self.add_system_message(f"🔄 Update from {agent_name}: {content[:100]}{'...' if len(content) > 100 else ''}")
-                        
-                        # Look for tool calls
-                        if 'agent' in node_data and isinstance(node_data['agent'], dict):
-                            agent_data = node_data['agent']
-                            if 'messages' in agent_data and agent_data['messages']:
-                                agent_message = agent_data['messages'][-1]
-                                if hasattr(agent_message, 'tool_calls') and agent_message.tool_calls:
-                                    for tool_call in agent_message.tool_calls:
-                                        print(f"Tool call: {tool_call}")
-                                        self.add_system_message(f"🔧 Tool called: {tool_call.get('name', 'Unknown')}")
+                            
+                            # Check for tool calls
+                            if hasattr(message, 'tool_calls') and message.tool_calls:
+                                for tool_call in message.tool_calls:
+                                    print(f"Tool call: {tool_call}")
+                                    self.add_system_message(f"🔧 Tool called: {tool_call.get('name', 'Unknown')}")
                         
                         # Look for tool responses
                         if 'tools' in node_data and isinstance(node_data['tools'], dict):

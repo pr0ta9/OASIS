@@ -31,6 +31,8 @@ class FileManager:
                 'unrecognized_paths': [...]
             }
         """
+        print(f"🔧 FileManager: Classifying files: {file_paths}")
+        
         classified = {
             'document_paths': [],
             'image_paths': [],
@@ -45,6 +47,7 @@ class FileManager:
                 
             # Get file extension
             _, ext = os.path.splitext(file_path.lower())
+            print(f"🔧 FileManager: Processing {file_path}, extension: {ext}")
             
             # Classify by extension only
             file_classified = False
@@ -52,12 +55,15 @@ class FileManager:
                 if ext in extensions:
                     classified[f'{file_type}_paths'].append(file_path)
                     file_classified = True
+                    print(f"🔧 FileManager: Classified {file_path} as {file_type}")
                     break
             
             # If extension not recognized, add to unrecognized
             if not file_classified:
                 classified['unrecognized_paths'].append(file_path)
+                print(f"🔧 FileManager: File {file_path} not recognized")
         
+        print(f"🔧 FileManager: Final classification: {classified}")
         return classified
     
     def validate_requirements(self, agent_type: str, state: MessagesState) -> Dict[str, any]:
